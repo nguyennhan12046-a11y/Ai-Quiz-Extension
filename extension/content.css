@@ -1,0 +1,28 @@
+.aia-highlight {
+  outline: 3px solid #4f46e5 !important;
+  outline-offset: 4px !important;
+  background-color: rgba(79, 70, 229, 0.08) !important;
+  border-radius: 6px !important;
+  transition: outline 0.15s, background-color 0.15s !important;
+}
+
+.aia-answered {
+  outline: 3px solid #16a34a !important;
+  outline-offset: 4px !important;
+  background-color: rgba(22, 163, 74, 0.1) !important;
+}
+
+.aia-question-badge {
+  position: absolute;
+  top: -12px;
+  left: 8px;
+  background: #4f46e5;
+  color: white;
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  padding: 2px 8px;
+  border-radius: 10px;
+  z-index: 2147483647;
+  pointer-events: none;
+  white-space: nowrap;
+}

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 340px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #1e293b;
+      background: #fff;
+    }
+    .header {
+      background: #4f46e5;
+      color: #fff;
+      padding: 14px 16px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+    }
+    .body {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #64748b;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.on { background: #16a34a; }
+    .status-dot.off { background: #dc2626; }
+    .btn {
+      width: 100%;
+      padding: 10px 0;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: #4f46e5; color: #fff; }
+    .btn-success { background: #16a34a; color: #fff; }
+    .btn-outline { background: #fff; color: #4f46e5; border: 1.5px solid #4f46e5; }
+    .progress {
+      font-size: 12px;
+      color: #64748b;
+      text-align: center;
+      min-height: 16px;
+    }
+    .settings {
+      border-top: 1px solid #e2e8f0;
+      padding: 10px 16px;
+      font-size: 11px;
+    }
+    .settings label {
+      display: block;
+      margin-bottom: 3px;
+      color: #64748b;
+      font-weight: 500;
+    }
+    .settings input, .settings select {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-bottom: 8px;
+      background: #fff;
+    }
+    .settings select {
+      cursor: pointer;
+    }
+    .settings .row {
+      display: flex;
+      gap: 8px;
+    }
+    .settings .row > div { flex: 1; }
+    .settings .field {
+      display: none;
+    }
+    .settings .field.visible {
+      display: block;
+    }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 0;
+      margin-bottom: 6px;
+    }
+    .toggle-row span {
+      color: #64748b;
+      font-weight: 500;
+    }
+    .log {
+      font-size: 11px;
+      color: #94a3b8;
+      word-break: break-all;
+      max-height: 80px;
+      overflow-y: auto;
+      border-top: 1px solid #e2e8f0;
+      padding: 8px 16px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">AI Answer Assistant</div>
+
+  <div class="body">
+    <div class="status-row">
+      <span class="status-dot off" id="statusDot"></span>
+      <span id="statusText">Checking...</span>
+    </div>
+
+    <button class="btn btn-primary" id="btnDetect">Detect Questions</button>
+    <button class="btn btn-success" id="btnAnswer" disabled>Answer All</button>
+    <button class="btn btn-outline" id="btnClear">Clear</button>
+
+    <div class="progress" id="progress"></div>
+  </div>
+
+  <div class="settings">
+    <label for="provider">AI Provider</label>
+    <select id="provider">
+      <option value="local">Local Backend</option>
+      <option value="openai">OpenAI API</option>
+    </select>
+
+    <div class="field" id="fieldLocal">
+      <label for="backendUrl">Backend URL</label>
+      <input type="text" id="backendUrl" placeholder="http://localhost:8765" />
+    </div>
+
+    <div class="field" id="fieldOpenAI">
+      <label for="openaiKey">API Key</label>
+      <input type="password" id="openaiKey" placeholder="sk-..." />
+
+      <label for="openaiBaseUrl">Base URL</label>
+      <input type="text" id="openaiBaseUrl" placeholder="https://api.openai.com" />
+
+      <label for="openaiModel">Model</label>
+      <input type="text" id="openaiModel" placeholder="gpt-4o" />
+    </div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
