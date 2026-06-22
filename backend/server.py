@@ -85,7 +85,7 @@ def parse_response(raw: str, questions: list[QuestionItem]) -> list[AnswerItem]:
         except (json.JSONDecodeError, KeyError):
             pass
 
-    answers: list[AnswerItem] = []
+    retranswers: list[AnswerItem] = []
     pattern = re.compile(
         r"(?:Question\s+ID:\s*(\S+)|Answer\s*(?:for\s*)?(\S+)?\s*:?\s*(.+?))(?=\n(?:Question|Answer|$)|\Z)",
         re.IGNORECASE,

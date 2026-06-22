@@ -106,6 +106,10 @@
     '.question-text-color',
     '.question-text',
     '.resizeable-text .text-container .question-text-color',
+    '.hackdown-content p',
+    '.challenge_problem_statement_body p',
+    '.question-title',
+    '.challenge_problem_statement',
     'legend', 'label', 'p',
   ];
 
@@ -221,6 +225,107 @@
         seen.add(container);
         log(`  + Added block ${blocks.length - 1} (button_choice)`);
       }
+    }
+
+    return blocks;
+  }
+
+  // ─── CUSTOM DIV-BASED CHOICE DETECTION (HackerRank, etc.) ───
+
+  function detectCustomChoiceItems() {
+    const blocks = [];
+    const seen = new Set();
+
+    const choiceSelectors = [
+      '.choice-item i.answer-icon',
+      '.choice-item',
+      '[data-analytics="McqChallengeOption"]',
+    ];
+
+    let choiceClickables = [];
+    for (const sel of choiceSelectors) {
+      const els = document.querySelectorAll(sel);
+      if (els.length >= 2) {
+        choiceClickables = Array.from(els).map((el) =>
+          el.classList.contains("answer-icon") ? el.parentElement : el
+        );
+        log(`Custom choice: found ${els.length} elements via "${sel}"`);
+        break;
+      }
+    }
+
+    if (choiceClickables.length < 2) return blocks;
+
+    const containerSelectors = [
+      '.choices-container',
+      '.choices-wrapper',
+      '[class*="choices"]',
+    ];
+
+    let container = null;
+    for (const sel of containerSelectors) {
+      container = document.querySelector(sel);
+      if (container) break;
+    }
+
+    if (!container) {
+      container = getCommonAncestor(choiceClickables);
+    }
+
+    if (!container || seen.has(container)) return blocks;
+
+    const options = choiceClickables.map((item) => {
+      const label = item.querySelector(".choice-label, .ui-icon-label");
+      return getVisibleText(label || item);
+    }).filter(Boolean);
+
+    log(`Custom choice: container`, container.tagName, container.className?.slice(0, 60), "options:", options);
+
+    if (options.length < 2) return blocks;
+
+    const { text } = findQuestionTextNearInputs(choiceClickables, container);
+    const fallback = getVisibleText(container);
+
+    if (!text && !isQuestionText(fallback)) {
+      let found = false;
+      let walker = container.parentElement;
+      while (walker && walker !== document.body) {
+        for (const sel of QUESTION_SELECTORS) {
+          const matches = walker.querySelectorAll(sel);
+          for (const el of matches) {
+            const t = getVisibleText(el);
+            if (isQuestionText(t)) {
+              blocks.push({
+                id: `q_${blocks.length}`,
+                type: "button_choice",
+                text: t,
+                options,
+                element: container,
+                inputs: choiceClickables,
+              });
+              seen.add(container);
+              found = true;
+              log(`  + Added block ${blocks.length - 1} (custom via broader search):`, JSON.stringify(t).slice(0, 80));
+              break;
+            }
+          }
+          if (found) break;
+        }
+        if (found) break;
+        walker = walker.parentElement;
+      }
+      if (!found) return blocks;
+    } else {
+      blocks.push({
+        id: `q_${blocks.length}`,
+        type: "button_choice",
+        text: text || fallback,
+        options,
+        element: container,
+        inputs: choiceClickables,
+      });
+      seen.add(container);
+      log(`  + Added block ${blocks.length - 1} (custom choice):`, JSON.stringify(text || fallback).slice(0, 80));
     }
 
     return blocks;
@@ -360,6 +465,12 @@
       return btnBlocks;
     }
 
+    const customBlocks = detectCustomChoiceItems();
+    if (customBlocks.length > 0) {
+      log(`Custom choice detection found ${customBlocks.length} block(s)`);
+      return customBlocks;
+    }
+
     const formBlocks = detectFormBasedQuestions();
     log(`Form-based detection found ${formBlocks.length} block(s)`);
     return formBlocks;
@@ -403,11 +514,20 @@
         const targetIndex = answer.charCodeAt(0) - 65;
         if (targetIndex >= 0 && targetIndex < block.inputs.length) {
           const el = block.inputs[targetIndex];
-          el.focus();
-          el.click();
-          el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-          el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
+
+          const icon = el.querySelector(".answer-icon, .ui-icon-circle, .ui-icon-check, [class*='icon']");
+          const clickTarget = icon || el;
+
+          clickTarget.focus();
+          clickTarget.click();
+          clickTarget.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+          clickTarget.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+          clickTarget.dispatchEvent(new Event("change", { bubbles: true }));
+
+          if (el !== clickTarget) {
+            el.click();
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+          }
 
           if (el.tagName === "INPUT" && el.type === "radio") {
             el.checked = true;
