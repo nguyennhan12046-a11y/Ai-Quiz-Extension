@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  if (globalThis.__AIA_CONTENT_LOADED__) return;
+
   if (typeof CSS === "undefined" || !CSS.escape) {
     CSS.escape = function (value) {
       const str = String(value);
@@ -456,24 +458,310 @@
     return blocks;
   }
 
+  // ─── GOOGLE FORMS ARIA CHOICES ───
+  // Forms renders options as role="radio" / role="checkbox" inside each question,
+  // not as <input>. Order follows aria-posinset when every option has one.
+
+  const SENSITIVE_PROMPT = /(?:^|[^a-z0-9])e-?mails?\b|email address|địa chỉ email|thư điện tử|họ(?:\s+và)?\s+tên|\bfull name\b|\b(?:first|last|given|family)\s+name\b|\byour name\b|tên của bạn|tên đầy đủ|\b(?:phone|telephone|mobile)(?:\s+number)?\b|số điện thoại|điện thoại|contact (?:info|information|number|details)|thông tin liên hệ|(?:home|street|mailing)\s+address|địa chỉ liên hệ|địa chỉ nhà|\bconsent\b|\bi agree\b|tôi đồng ý|đồng ý|chấp thuận/;
+  const SENSITIVE_AUTOCOMPLETE = /(?:^|[\s-])(email|name|given-name|family-name|additional-name|nickname|username|tel|tel-national|tel-country-code|street-address|address-line1|address-line2|postal-code|bday|bday-day|bday-month|bday-year)(?:$|[\s-])/;
+  const NAV_LABELS = new Set([
+    "submit", "next", "back", "previous", "prev", "send", "continue",
+    "gửi", "gửi biểu mẫu", "nộp", "nộp bài", "tiếp", "tiếp theo", "quay lại", "trước", "sau",
+  ]);
+
+  function normText(value) {
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  }
+
+  function fold(value) {
+    return normText(value).normalize("NFC").toLowerCase();
+  }
+
+  function isSensitivePrompt(text) {
+    return SENSITIVE_PROMPT.test(fold(text));
+  }
+
+  function ownedByRoot(el, root) {
+    if (!el || !root || !root.contains(el)) return false;
+    if (root.getAttribute("role") === "listitem") return el.closest('[role="listitem"]') === root;
+    const item = el.closest('[role="listitem"]');
+    return !item || root.contains(item);
+  }
+
+  function isInHiddenTree(el) {
+    let node = el;
+    while (node && node.nodeType === 1) {
+      if (node.hidden) return true;
+      if (node.getAttribute("aria-hidden") === "true") return true;
+      if ((node.getAttribute("type") || "").toLowerCase() === "hidden") return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  function isChoiceCandidate(el, root) {
+    if (!ownedByRoot(el, root)) return false;
+    if (isInHiddenTree(el)) return false;
+    if (el.closest('[role="menu"], [role="menubar"], [role="navigation"], [role="listbox"]')) return false;
+    return true;
+  }
+
+  function sortByPosinset(elements) {
+    const allNumbered = elements.every((el) => {
+      if (!el.hasAttribute("aria-posinset")) return false;
+      return Number.isFinite(Number(el.getAttribute("aria-posinset")));
+    });
+    if (!allNumbered) return elements.slice();
+    return elements
+      .map((el, index) => ({ el, index, pos: Number(el.getAttribute("aria-posinset")) }))
+      .sort((a, b) => a.pos - b.pos || a.index - b.index)
+      .map((item) => item.el);
+  }
+
+  function cleanQuestionText(el) {
+    if (!el) return "";
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll("[role='radio'], [role='checkbox'], [role='radiogroup'], input, textarea, select, button").forEach((node) => node.remove());
+    [...clone.querySelectorAll("*")].forEach((node) => {
+      const lab = node.getAttribute("aria-label") || "";
+      const visible = normText(node.textContent || "");
+      if (/required|bắt buộc|bat buoc/.test(fold(lab)) && visible.length <= 2) node.remove();
+      else if (visible === "*" && node.children.length === 0) node.remove();
+    });
+    return normText(clone.textContent || "").replace(/\s*\*\s*$/, "").trim();
+  }
+
+  function textFromIds(doc, idref) {
+    if (!doc || !idref) return "";
+    const parts = idref.split(/\s+/).map((id) => {
+      const el = doc.getElementById(id);
+      return el ? cleanQuestionText(el) : "";
+    }).filter(Boolean);
+    return normText(parts.join(" "));
+  }
+
+  function readHeading(root) {
+    const headings = [...root.querySelectorAll('[role="heading"]')].filter((heading) => {
+      if (heading.closest("[role='radio'], [role='checkbox']")) return false;
+      if (root.getAttribute("role") === "listitem") return heading.closest('[role="listitem"]') === root;
+      const item = heading.closest('[role="listitem"]');
+      return !item || root.contains(item);
+    });
+    if (headings[0]) return cleanQuestionText(headings[0]);
+
+    const title = [...root.querySelectorAll(".M7eMe")].find((el) => {
+      if (el.closest("[role='radio'], [role='checkbox']")) return false;
+      if (root.getAttribute("role") === "listitem") return el.closest('[role="listitem"]') === root;
+      return true;
+    });
+    if (title) return cleanQuestionText(title);
+
+    const group = [...root.querySelectorAll('[role="radiogroup"], [role="group"]')].find((el) => ownedByRoot(el, root));
+    if (group) {
+      const labelled = textFromIds(group.ownerDocument, group.getAttribute("aria-labelledby"));
+      if (labelled) return labelled;
+      const aria = normText(group.getAttribute("aria-label") || "");
+      if (aria) return aria.replace(/\s*\*\s*$/, "").trim();
+    }
+    return "";
+  }
+
+  function rowOptionText(el) {
+    const parent = el.parentElement;
+    if (!parent) return "";
+    const choices = parent.querySelectorAll("[role='radio'], [role='checkbox']");
+    if (choices.length > 1) {
+      const next = el.nextElementSibling;
+      if (!next) return "";
+      const role = next.getAttribute("role") || "";
+      if (role === "radio" || role === "checkbox") return "";
+      return getVisibleText(next);
+    }
+    const clone = parent.cloneNode(true);
+    clone.querySelectorAll("[role='radio'], [role='checkbox'], input, textarea, select, button").forEach((node) => node.remove());
+    return getVisibleText(clone);
+  }
+
+  function optionLabel(el) {
+    const doc = el.ownerDocument;
+    const labelledBy = el.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      const nodes = labelledBy.split(/\s+/).map((id) => doc.getElementById(id)).filter(Boolean);
+      const text = nodes
+        .filter((node) => node.getAttribute("role") !== "heading" && !node.contains(el))
+        .map((node) => getVisibleText(node))
+        .filter(Boolean)
+        .join(" ");
+      if (normText(text)) return normText(text);
+    }
+    const aria = normText(el.getAttribute("aria-label") || "");
+    if (aria) return aria;
+    const data = normText(el.getAttribute("data-value") || el.getAttribute("data-answer-value") || "");
+    if (data) return data;
+    const own = getVisibleText(el);
+    if (own) return own;
+    return normText(rowOptionText(el));
+  }
+
+  function formsQuestionRoots(doc) {
+    const roots = [];
+    const seen = new Set();
+    doc.querySelectorAll('[role="listitem"]').forEach((el) => {
+      if (seen.has(el)) return;
+      seen.add(el);
+      roots.push(el);
+    });
+    doc.querySelectorAll('[role="radiogroup"], [role="group"]').forEach((group) => {
+      if (group.closest('[role="listitem"]')) return;
+      let root = group.closest("[data-params]") || group.parentElement || group;
+      if (!root || root === doc.body || root === doc.documentElement) root = group;
+      if (seen.has(root)) return;
+      seen.add(root);
+      roots.push(root);
+    });
+    return roots;
+  }
+
+  function radiosInRoot(root) {
+    const groups = [...root.querySelectorAll('[role="radiogroup"]')].filter((group) => ownedByRoot(group, root));
+    if (groups.length) {
+      return groups
+        .map((group) => sortByPosinset([...group.querySelectorAll('[role="radio"]')].filter((el) => isChoiceCandidate(el, root))))
+        .filter((radios) => radios.length >= 2);
+    }
+    const radios = sortByPosinset([...root.querySelectorAll('[role="radio"]')].filter((el) => isChoiceCandidate(el, root)));
+    return radios.length >= 2 ? [radios] : [];
+  }
+
+  function checkboxesInRoot(root) {
+    return sortByPosinset([...root.querySelectorAll('[role="checkbox"]')].filter((el) => isChoiceCandidate(el, root)));
+  }
+
+  function isSensitiveField(input, questionText) {
+    const type = (input.getAttribute("type") || "").toLowerCase();
+    if (type === "email" || type === "tel" || type === "password") return true;
+    const inputMode = (input.getAttribute("inputmode") || "").toLowerCase();
+    if (inputMode === "email" || inputMode === "tel") return true;
+    const autocomplete = (input.getAttribute("autocomplete") || "").toLowerCase();
+    if (SENSITIVE_AUTOCOMPLETE.test(autocomplete)) return true;
+    const blob = [questionText, input.getAttribute("aria-label"), input.getAttribute("name"), input.getAttribute("placeholder"), input.id]
+      .filter(Boolean)
+      .join(" ");
+    return isSensitivePrompt(blob);
+  }
+
+  function safeTextInput(root, questionText) {
+    const question = normText(questionText);
+    if (question.length < 2 || isSensitivePrompt(question)) return null;
+    const inputs = [...root.querySelectorAll("input, textarea")];
+    for (const input of inputs) {
+      if (!ownedByRoot(input, root)) continue;
+      if (isInHiddenTree(input)) continue;
+      if (input.closest("[role='radio'], [role='checkbox'], [role='listbox']")) continue;
+      if (input.disabled || input.readOnly) continue;
+      const type = (input.getAttribute("type") || "").toLowerCase();
+      const textual = input.tagName === "TEXTAREA" || type === "" || type === "text" || type === "number";
+      if (!textual) continue;
+      if (isSensitiveField(input, question)) continue;
+      return input;
+    }
+    return null;
+  }
+
+  function buildChoiceBlock(root, elements, type, questionText) {
+    const question = normText(questionText);
+    if (question.length < 2) return null;
+    const pairs = [];
+    for (const el of elements) {
+      const label = normText(optionLabel(el));
+      if (!label) continue;
+      pairs.push({ el, label });
+    }
+    if (pairs.length < 2) return null;
+    return {
+      id: "q_0",
+      type,
+      text: question,
+      options: pairs.map((pair) => pair.label),
+      element: root,
+      inputs: pairs.map((pair) => pair.el),
+    };
+  }
+
+  function detectGoogleFormsQuestions() {
+    const blocks = [];
+    for (const root of formsQuestionRoots(document)) {
+      if (isInHiddenTree(root)) continue;
+      const questionText = readHeading(root);
+      const radioGroups = radiosInRoot(root);
+      if (radioGroups.length) {
+        for (const radios of radioGroups) {
+          const block = buildChoiceBlock(root, radios, "multiple_choice", questionText);
+          if (!block) continue;
+          blocks.push(block);
+          log(`Forms: + multiple_choice "${block.text}" options:`, block.options);
+        }
+        continue;
+      }
+      const checks = checkboxesInRoot(root);
+      if (checks.length >= 2) {
+        const block = buildChoiceBlock(root, checks, "checkbox", questionText);
+        if (!block) continue;
+        blocks.push(block);
+        log(`Forms: + checkbox "${block.text}" options:`, block.options);
+        continue;
+      }
+      const input = safeTextInput(root, questionText);
+      if (!input) continue;
+      blocks.push({
+        id: "q_0",
+        type: "text",
+        text: normText(questionText),
+        options: null,
+        element: root,
+        inputs: [input],
+      });
+      log(`Forms: + text "${normText(questionText)}"`);
+    }
+    return blocks;
+  }
+
+  function assignIds(blocks) {
+    blocks.forEach((block, index) => {
+      block.id = `q_${index}`;
+    });
+    return blocks;
+  }
+
+  function blockOverlaps(block, formsBlocks) {
+    if (!block || !block.inputs) return false;
+    return block.inputs.some((input) => formsBlocks.some((formsBlock) => {
+      if (formsBlock.inputs.includes(input)) return true;
+      return !!(formsBlock.element && formsBlock.element.contains && formsBlock.element.contains(input));
+    }));
+  }
+
   function detectQuestionBlocks() {
     log("=== Starting detection ===");
 
     const btnBlocks = detectButtonBasedQuestions();
     if (btnBlocks.length > 0) {
       log(`Button-based detection found ${btnBlocks.length} block(s)`);
-      return btnBlocks;
+      return assignIds(btnBlocks);
     }
 
     const customBlocks = detectCustomChoiceItems();
     if (customBlocks.length > 0) {
       log(`Custom choice detection found ${customBlocks.length} block(s)`);
-      return customBlocks;
+      return assignIds(customBlocks);
     }
 
-    const formBlocks = detectFormBasedQuestions();
-    log(`Form-based detection found ${formBlocks.length} block(s)`);
-    return formBlocks;
+    const formsBlocks = detectGoogleFormsQuestions();
+    log(`Google Forms detection found ${formsBlocks.length} block(s)`);
+
+    const nativeBlocks = detectFormBasedQuestions().filter((block) => !blockOverlaps(block, formsBlocks));
+    log(`Form-based detection found ${nativeBlocks.length} block(s)`);
+    return assignIds(formsBlocks.concat(nativeBlocks));
   }
 
   // ─── HIGHLIGHT / ANSWER INJECTION ───
@@ -504,89 +792,259 @@
     block.element.classList.add("aia-answered");
   }
 
-  function injectAnswer(block, answerText) {
-    const answer = answerText.trim().toUpperCase();
-    log(`  Injecting: ${block.id} (${block.type}) <- "${answerText}"`);
-
-    switch (block.type) {
-      case "button_choice":
-      case "multiple_choice": {
-        const targetIndex = answer.charCodeAt(0) - 65;
-        if (targetIndex >= 0 && targetIndex < block.inputs.length) {
-          const el = block.inputs[targetIndex];
-
-          const icon = el.querySelector(".answer-icon, .ui-icon-circle, .ui-icon-check, [class*='icon']");
-          const clickTarget = icon || el;
-
-          clickTarget.focus();
-          clickTarget.click();
-          clickTarget.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-          clickTarget.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-          clickTarget.dispatchEvent(new Event("change", { bubbles: true }));
-
-          if (el !== clickTarget) {
-            el.click();
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-          }
-
-          if (el.tagName === "INPUT" && el.type === "radio") {
-            el.checked = true;
-          }
-
-          log(`  -> Clicked [${targetIndex}]:`, el.tagName, el.className?.slice(0, 40));
-        } else {
-          log(`  -> Invalid index ${targetIndex} (answer="${answer}")`);
-        }
-        break;
-      }
-      case "checkbox": {
-        const letters = answer.match(/[A-Z]/g) || [];
-        block.inputs.forEach((cb, i) => {
-          const shouldCheck = letters.some((l) => l.charCodeAt(0) - 65 === i);
-          if (shouldCheck && !cb.checked) {
-            cb.click();
-            cb.checked = true;
-            cb.dispatchEvent(new Event("change", { bubbles: true }));
-          } else if (!shouldCheck && cb.checked) {
-            cb.click();
-            cb.checked = false;
-            cb.dispatchEvent(new Event("change", { bubbles: true }));
-          }
-        });
-        break;
-      }
-      case "select": {
-        const select = block.inputs[0];
-        const targetIndex = answer.charCodeAt(0) - 65;
-        if (targetIndex >= 0 && targetIndex < select.options.length) {
-          select.selectedIndex = targetIndex + 1;
-          select.value = select.options[targetIndex + 1]?.value || select.options[targetIndex]?.value;
-          select.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        break;
-      }
-      case "text": {
-        const input = block.inputs[0];
-        const valSetter = Object.getOwnPropertyDescriptor(
-          input.tagName === "TEXTAREA"
-            ? window.HTMLTextAreaElement.prototype
-            : window.HTMLInputElement.prototype,
-          "value"
-        ).set;
-        valSetter.call(input, answerText.trim());
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-        break;
-      }
-    }
-
-    markAnswered(block);
+  function isAriaWidget(el, role) {
+    return !!el && el.tagName !== "INPUT" && el.tagName !== "SELECT" && el.getAttribute && el.getAttribute("role") === role;
   }
 
-  log("Content script loaded on", window.location.href);
+  function ariaOn(el) {
+    return fold(el.getAttribute("aria-checked") || "") === "true";
+  }
 
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    log("Message received:", msg.action);
+  function isNavLabel(value) {
+    return NAV_LABELS.has(fold(value));
+  }
+
+  function isForbiddenControl(el) {
+    let node = el;
+    while (node && node.nodeType === 1) {
+      if ((node.getAttribute("type") || "").toLowerCase() === "submit") return true;
+      const role = (node.getAttribute("role") || "").toLowerCase();
+      if (node.tagName === "BUTTON" || role === "button") {
+        const label = node.getAttribute("aria-label") || getVisibleText(node);
+        if (isNavLabel(label)) return true;
+      }
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  function clickOnce(el) {
+    if (!el || isForbiddenControl(el)) return false;
+    el.click();
+    return true;
+  }
+
+  function resolveSingleIndex(block, answerText) {
+    const options = block.options || [];
+    const raw = normText(answerText);
+    if (!raw || !options.length) return null;
+    const key = fold(raw);
+    const matches = [];
+    options.forEach((opt, index) => {
+      if (fold(opt) === key) matches.push(index);
+    });
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) return null;
+    const letter = raw.match(/^([A-Za-z])(?:[.)])?$/);
+    if (!letter) return null;
+    const index = letter[1].toUpperCase().charCodeAt(0) - 65;
+    if (index < 0 || index >= options.length) return null;
+    return index;
+  }
+
+  function resolveCheckboxIndexes(block, answerText) {
+    const options = block.options || [];
+    const raw = normText(answerText);
+    if (!raw || !options.length) return null;
+
+    const pieces = raw.split(/\s*[,;/|]\s*/).map((part) => part.trim()).filter(Boolean);
+    if (pieces.length) {
+      const indexes = [];
+      let allMatch = true;
+      for (const piece of pieces) {
+        const index = options.findIndex((opt) => fold(opt) === fold(piece));
+        if (index < 0) {
+          allMatch = false;
+          break;
+        }
+        indexes.push(index);
+      }
+      if (allMatch) return [...new Set(indexes)];
+    }
+
+    let letters = null;
+    if (/^[A-Za-z]$/.test(raw) || /^[A-Za-z](?:\s*[,;/|\s]\s*[A-Za-z])+$/.test(raw) || /^[A-Za-z]{2,}$/.test(raw)) {
+      letters = raw.toUpperCase().match(/[A-Z]/g) || [];
+    }
+    if (!letters || !letters.length) return null;
+    const indexes = letters.map((letter) => letter.charCodeAt(0) - 65);
+    if (indexes.some((index) => index < 0 || index >= options.length)) return null;
+    return [...new Set(indexes)];
+  }
+
+  function applyAriaRadio(block, index) {
+    const el = block.inputs[index];
+    if (!el || isForbiddenControl(el)) return { ok: false, error: "Refusing navigation control" };
+    if (ariaOn(el)) return { ok: true };
+    if (!clickOnce(el)) return { ok: false, error: "Refusing navigation control" };
+    return { ok: true };
+  }
+
+  function applyAriaCheckboxes(block, indexes) {
+    const desired = new Set(indexes);
+    for (const el of block.inputs) {
+      if (isForbiddenControl(el)) return { ok: false, error: "Refusing navigation control" };
+    }
+    for (let i = 0; i < block.inputs.length; i++) {
+      const el = block.inputs[i];
+      if (ariaOn(el) === desired.has(i)) continue;
+      if (!clickOnce(el)) return { ok: false, error: "Refusing navigation control" };
+    }
+    return { ok: true };
+  }
+
+  function applyNativeCheckboxes(block, indexes) {
+    const desired = new Set(indexes);
+    for (const el of block.inputs) {
+      if (isForbiddenControl(el)) return { ok: false, error: "Refusing navigation control" };
+    }
+    block.inputs.forEach((input, index) => {
+      const shouldCheck = desired.has(index);
+      if (shouldCheck === Boolean(input.checked)) return;
+      input.click();
+      input.checked = shouldCheck;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    return { ok: true };
+  }
+
+  function applyLegacyClick(block, targetIndex) {
+    const el = block.inputs[targetIndex];
+    if (!el || isForbiddenControl(el)) return { ok: false, error: "Refusing navigation control" };
+
+    const icon = el.querySelector(".answer-icon, .ui-icon-circle, .ui-icon-check, [class*='icon']");
+    const clickTarget = icon || el;
+    if (isForbiddenControl(clickTarget)) return { ok: false, error: "Refusing navigation control" };
+
+    clickTarget.focus();
+    clickTarget.click();
+    clickTarget.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    clickTarget.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    clickTarget.dispatchEvent(new Event("change", { bubbles: true }));
+
+    if (el !== clickTarget) {
+      el.click();
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    if (el.tagName === "INPUT" && el.type === "radio") {
+      el.checked = true;
+    }
+
+    log(`  -> Clicked [${targetIndex}]:`, el.tagName, typeof el.className === "string" ? el.className.slice(0, 40) : "");
+    return { ok: true };
+  }
+
+  function applySelect(block, index) {
+    const select = block.inputs[0];
+    if (!select || isForbiddenControl(select)) return { ok: false, error: "Refusing navigation control" };
+    const options = block.options || [];
+    if (index < 0 || index >= options.length) return { ok: false, error: "Invalid option" };
+    const first = select.options[0];
+    const hasPlaceholder = !!first && !normText(first.value || "");
+    const domIndex = hasPlaceholder ? index + 1 : index;
+    const option = select.options[domIndex];
+    if (!option) return { ok: false, error: "Invalid option" };
+    select.selectedIndex = domIndex;
+    select.value = option.value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return { ok: true };
+  }
+
+  function applyText(block, value) {
+    const input = block.inputs[0];
+    if (!input || isForbiddenControl(input)) return { ok: false, error: "Refusing navigation control" };
+    const proto = input.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, "value");
+    if (desc && typeof desc.set === "function") desc.set.call(input, value);
+    else input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return { ok: true };
+  }
+
+  function injectAnswer(block, answerText) {
+    const text = typeof answerText === "number" && Number.isFinite(answerText) ? String(answerText) : answerText;
+    if (typeof text !== "string" || !normText(text)) return { ok: false, error: "Invalid answer" };
+    log(`  Injecting: ${block.id} (${block.type}) <- "${text}"`);
+
+    if (block.type === "text") {
+      const result = applyText(block, normText(text));
+      if (result.ok) markAnswered(block);
+      return result;
+    }
+
+    const first = block.inputs && block.inputs[0];
+    if (block.type === "checkbox") {
+      const indexes = resolveCheckboxIndexes(block, text);
+      if (!indexes) {
+        log(`  -> Invalid checkbox answer "${text}"`);
+        return { ok: false, error: "Invalid option" };
+      }
+      const result = isAriaWidget(first, "checkbox") ? applyAriaCheckboxes(block, indexes) : applyNativeCheckboxes(block, indexes);
+      if (result.ok) markAnswered(block);
+      return result;
+    }
+
+    if (block.type === "multiple_choice" || block.type === "button_choice" || block.type === "select") {
+      const index = resolveSingleIndex(block, text);
+      if (index == null) {
+        log(`  -> Invalid option "${text}"`);
+        return { ok: false, error: "Invalid option" };
+      }
+      let result;
+      if (block.type === "select") result = applySelect(block, index);
+      else if (isAriaWidget(first, "radio")) result = applyAriaRadio(block, index);
+      else result = applyLegacyClick(block, index);
+      if (result.ok) markAnswered(block);
+      return result;
+    }
+
+    return { ok: false, error: "Unsupported question" };
+  }
+
+  function coerceAnswerEntry(entry) {
+    if (!entry || typeof entry !== "object") return { id: "", answer: null, error: "Invalid answer" };
+    const id = entry.id == null ? "" : String(entry.id);
+    let answer = entry.answer;
+    if (typeof answer === "number" && Number.isFinite(answer)) answer = String(answer);
+    if (!id || typeof answer !== "string") return { id, answer: null, error: "Invalid answer" };
+    return { id, answer, error: null };
+  }
+
+  function applyAnswers(msg) {
+    const answers = msg && Array.isArray(msg.answers) ? msg.answers : null;
+    if (!answers || answers.length === 0) {
+      return { ok: false, applied: 0, results: [], error: "No answers" };
+    }
+    const results = [];
+    for (const entry of answers) {
+      const coerced = coerceAnswerEntry(entry);
+      if (coerced.error) {
+        results.push({ id: coerced.id, ok: false, error: coerced.error });
+        continue;
+      }
+      const block = detectedBlocks.find((item) => item.id === coerced.id);
+      if (!block) {
+        results.push({ id: coerced.id, ok: false, error: "Unknown question" });
+        continue;
+      }
+      try {
+        const applied = injectAnswer(block, coerced.answer);
+        if (applied && applied.ok) results.push({ id: coerced.id, ok: true });
+        else results.push({ id: coerced.id, ok: false, error: (applied && applied.error) || "Not applied" });
+      } catch (err) {
+        log("ERROR injecting answers:", err.message);
+        results.push({ id: coerced.id, ok: false, error: err.message });
+      }
+    }
+    const appliedCount = results.filter((item) => item.ok).length;
+    return { ok: appliedCount === results.length, applied: appliedCount, results };
+  }
+
+  function onMessage(msg, _sender, sendResponse) {
+    log("Message received:", msg && msg.action);
+    if (!msg || !msg.action) return;
 
     switch (msg.action) {
       case "detect": {
@@ -597,34 +1055,27 @@
           log("ERROR in detectQuestionBlocks:", err.message, err.stack);
           detectedBlocks = [];
         }
-        highlightBlocks(detectedBlocks);
-
-        const payload = detectedBlocks.map((b) => ({
-          id: b.id,
-          type: b.type,
-          text: b.text,
-          options: b.options,
+        try {
+          highlightBlocks(detectedBlocks);
+        } catch (err) {
+          log("ERROR highlighting:", err.message);
+        }
+        const questions = detectedBlocks.map((block) => ({
+          id: block.id,
+          type: block.type,
+          text: block.text,
+          options: block.options,
         }));
-
-        sendResponse({ count: detectedBlocks.length, questions: payload });
+        sendResponse({ count: detectedBlocks.length, questions });
         break;
       }
       case "answer": {
-        const { answers } = msg;
-        log(`Answering ${answers.length} question(s)`);
         try {
-          for (const ans of answers) {
-            const block = detectedBlocks.find((b) => b.id === ans.id);
-            if (block) {
-              injectAnswer(block, ans.answer);
-            } else {
-              log(`  No block found for answer id: ${ans.id}`);
-            }
-          }
+          sendResponse(applyAnswers(msg));
         } catch (err) {
           log("ERROR injecting answers:", err.message);
+          sendResponse({ ok: false, applied: 0, results: [], error: err.message });
         }
-        sendResponse({ ok: true });
         break;
       }
       case "clear": {
@@ -634,5 +1085,14 @@
         break;
       }
     }
-  });
+  }
+
+  if (!globalThis.chrome || !chrome.runtime || !chrome.runtime.onMessage) {
+    log("chrome.runtime.onMessage unavailable");
+    return;
+  }
+
+  chrome.runtime.onMessage.addListener(onMessage);
+  globalThis.__AIA_CONTENT_LOADED__ = true;
+  log("Content script loaded on", location.href);
 })();
