@@ -59,6 +59,7 @@ const (
 	wmRButtonUp        = 0x0205
 	wmContextMenu      = 0x007B
 	modAlt             = 0x0001
+	modControl         = 0x0002
 	modShift           = 0x0004
 	vkQ                = 0x51
 	swHide             = 0
@@ -100,6 +101,7 @@ const (
 	idTrayExit   = 403
 	hotToggle    = 1
 	hotAnswer    = 2
+	hotExit      = 3
 )
 
 var (
@@ -762,6 +764,7 @@ func startupStatus(cfg config.File) string {
 	}
 	return state + ". Dán khóa Groq vào ô mật, bấm Lưu cài đặt, rồi Mở cửa sổ Google Form. " +
 		"Bạn tự đăng nhập Google trong cửa sổ đó nếu cần. Alt+Shift+Q bật/tắt. Alt+Q điền đáp án. " +
+		"Ctrl+Alt+Shift+Q thoát hẳn, kể cả khi cửa sổ đang ẩn. " +
 		"Bấm X để ẩn xuống khay cạnh đồng hồ; chuột phải biểu tượng để chọn Thoát. " +
 		"Nếu phím đã bị chương trình khác giữ, hãy dùng các nút. Công cụ không tự bấm Gửi hoặc Tiếp."
 }
@@ -773,18 +776,38 @@ func toggleText(on bool) string {
 	return "Đang tắt — bấm để bật"
 }
 
+func hotkeyMods(hk traylife.Hotkey) uintptr {
+	var mods uintptr
+	if hk.Alt {
+		mods |= modAlt
+	}
+	if hk.Shift {
+		mods |= modShift
+	}
+	if hk.Ctrl {
+		mods |= modControl
+	}
+	return mods
+}
+
 func registerKeys(hwnd uintptr) {
-	ok1, _, _ := procRegisterHotKey.Call(hwnd, hotToggle, modAlt|modShift, vkQ)
-	ok2, _, _ := procRegisterHotKey.Call(hwnd, hotAnswer, modAlt, vkQ)
-	if ok1 == 0 || ok2 == 0 {
-		extra := ""
-		if ok1 == 0 {
-			extra += " Alt+Shift+Q đang bị chương trình khác giữ."
+	var blocked []string
+	for _, hk := range traylife.Hotkeys() {
+		ok, _, _ := procRegisterHotKey.Call(hwnd, uintptr(hk.ID), hotkeyMods(hk), vkQ)
+		if ok == 0 {
+			blocked = append(blocked, hk.Label)
 		}
-		if ok2 == 0 {
-			extra += " Alt+Q đang bị chương trình khác giữ (có thể là tiện ích trình duyệt)."
-		}
-		ui.setStatus(startupStatus(ui.cfg) + extra + " Các nút trong cửa sổ vẫn dùng được.")
+	}
+	if len(blocked) == 0 {
+		return
+	}
+	ui.note("hotkey-conflict")
+	ui.setStatus(startupStatus(ui.cfg) + " Phím bị chương trình khác giữ: " + strings.Join(blocked, ", ") + ". Menu khay Thoát vẫn dùng được.")
+}
+
+func unregisterAllHotkeys(hwnd uintptr) {
+	for _, id := range traylife.ReleaseIDs() {
+		procUnregisterHot.Call(hwnd, uintptr(id))
 	}
 }
 
@@ -910,8 +933,7 @@ func (a *app) exitApp() {
 	a.gate.Invalidate()
 	a.stopWork()
 	a.removeTray()
-	procUnregisterHot.Call(a.msgHwnd, hotToggle)
-	procUnregisterHot.Call(a.msgHwnd, hotAnswer)
+	unregisterAllHotkeys(a.msgHwnd)
 	if a.hwnd != 0 {
 		procDestroyWindow.Call(a.hwnd)
 	}
@@ -925,13 +947,16 @@ func (a *app) onHotkey(id uintptr) {
 	if a.quitting {
 		return
 	}
-	switch id {
-	case hotToggle:
+	switch traylife.ActionFor(int(id)) {
+	case "toggle":
 		a.note("hotkey-toggle")
 		a.onCommand(idToggle)
-	case hotAnswer:
+	case "answer":
 		a.note("hotkey-answer")
 		a.onCommand(idAnswer)
+	case "exit":
+		a.note("hotkey-exit")
+		a.exitApp()
 	}
 }
 
@@ -967,7 +992,7 @@ func (a *app) showTrayMenu() {
 		appendItem(menu, idTrayToggle, "Đang tắt — chọn để bật")
 	}
 	procAppendMenu.Call(menu, mfSeparator, 0, 0)
-	appendItem(menu, idTrayExit, "Thoát")
+	appendItem(menu, idTrayExit, "Thoát (Ctrl+Alt+Shift+Q)")
 	procSetForeground.Call(a.hwnd)
 	var pt point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))

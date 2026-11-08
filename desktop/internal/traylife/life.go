@@ -49,3 +49,42 @@ func SecondInstance(foundWindow bool) SecondInstanceAction {
 func EndProcess(explicitExit bool) bool {
 	return explicitExit
 }
+
+// Hotkey is a global shortcut owned by the hidden message window.
+type Hotkey struct {
+	ID     int
+	Alt    bool
+	Shift  bool
+	Ctrl   bool
+	Key    string
+	Action string
+	Label  string
+}
+
+// Hotkeys are the only global shortcuts this app registers.
+// Alt+Q answers, Alt+Shift+Q toggles, Ctrl+Alt+Shift+Q exits.
+func Hotkeys() []Hotkey {
+	return []Hotkey{
+		{ID: 1, Alt: true, Shift: true, Key: "Q", Action: "toggle", Label: "Alt+Shift+Q"},
+		{ID: 2, Alt: true, Key: "Q", Action: "answer", Label: "Alt+Q"},
+		{ID: 3, Ctrl: true, Alt: true, Shift: true, Key: "Q", Action: "exit", Label: "Ctrl+Alt+Shift+Q"},
+	}
+}
+
+func ActionFor(id int) string {
+	for _, hk := range Hotkeys() {
+		if hk.ID == id {
+			return hk.Action
+		}
+	}
+	return ""
+}
+
+// ReleaseIDs is every hotkey id that shutdown must unregister.
+func ReleaseIDs() []int {
+	ids := make([]int, 0, len(Hotkeys()))
+	for _, hk := range Hotkeys() {
+		ids = append(ids, hk.ID)
+	}
+	return ids
+}

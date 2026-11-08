@@ -44,6 +44,48 @@ func TestVisibleWindowDestroyDoesNotEndProcess(t *testing.T) {
 	}
 }
 
+func TestHotkeysKeepAnswerToggleAndAddQuit(t *testing.T) {
+	got := map[string]Hotkey{}
+	seen := map[int]bool{}
+	for _, hk := range Hotkeys() {
+		if hk.Key != "Q" {
+			t.Fatalf("unexpected key %+v", hk)
+		}
+		if seen[hk.ID] {
+			t.Fatalf("duplicate id %d", hk.ID)
+		}
+		seen[hk.ID] = true
+		got[hk.Action] = hk
+		if ActionFor(hk.ID) != hk.Action {
+			t.Fatalf("action map %d", hk.ID)
+		}
+	}
+	if len(got) != 3 {
+		t.Fatalf("actions = %d", len(got))
+	}
+	toggle := got["toggle"]
+	if !toggle.Alt || !toggle.Shift || toggle.Ctrl || toggle.Label != "Alt+Shift+Q" {
+		t.Fatalf("toggle changed: %+v", toggle)
+	}
+	answer := got["answer"]
+	if !answer.Alt || answer.Shift || answer.Ctrl || answer.Label != "Alt+Q" {
+		t.Fatalf("answer changed: %+v", answer)
+	}
+	exitKey := got["exit"]
+	if !exitKey.Ctrl || !exitKey.Alt || !exitKey.Shift || exitKey.Label != "Ctrl+Alt+Shift+Q" {
+		t.Fatalf("exit shortcut: %+v", exitKey)
+	}
+	ids := ReleaseIDs()
+	if len(ids) != len(Hotkeys()) {
+		t.Fatal("shutdown would leave a hotkey registered")
+	}
+	for i, hk := range Hotkeys() {
+		if ids[i] != hk.ID {
+			t.Fatalf("release id %d != %d", ids[i], hk.ID)
+		}
+	}
+}
+
 func TestSecondInstanceDoesNotOwnHotkeys(t *testing.T) {
 	if SecondInstance(true) != ShowExistingWindow {
 		t.Fatal("existing window should be restored")
