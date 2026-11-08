@@ -1,8 +1,9 @@
 TRỢ LÝ ĐIỀN GOOGLE FORM — BẢN KHAY HỆ THỐNG
 ================================================
 
-File cần mở: AIQuizForms-tray-v3.exe
-Không mở lại AIQuizForms.exe, AIQuizForms-tray.exe, hay AIQuizForms-tray-v2.exe.
+File cần mở: AIQuizForms-tray-v3b.exe
+Không mở AIQuizForms-tray-v3.exe (bản đó thoát bằng Ctrl+Alt+Shift+Q).
+Không mở AIQuizForms.exe, AIQuizForms-tray.exe, hay AIQuizForms-tray-v2.exe.
 Đây là chương trình Windows riêng, không phải tiện ích trình duyệt.
 Nó mở một cửa sổ Edge hoặc Chrome riêng. Cửa sổ trình duyệt đó không bị ẩn.
 
@@ -10,7 +11,7 @@ Chuyển từ bản v2 (AIQuizForms-tray-v2.exe)
 1. Nếu cửa sổ v2 đang hiện, chuột phải biểu tượng cạnh đồng hồ và chọn Thoát. Bấm X chỉ ẩn bản v2, không thoát.
 2. Nếu không thấy cửa sổ, vẫn chuột phải biểu tượng cạnh đồng hồ và chọn Thoát.
 3. Mở Task Manager (Ctrl+Shift+Esc). Nếu còn AIQuizForms-tray-v2.exe hoặc AIQuizForms.exe, chọn End task.
-4. Sau đó mới bấm đúp AIQuizForms-tray-v3.exe.
+4. Sau đó mới bấm đúp AIQuizForms-tray-v3b.exe.
 5. Không cần dán lại khóa Groq. Bản mới dùng cùng file %AppData%\AIQuizForms\config.json.
 6. Không chạy hai bản cùng lúc. Bản mới sẽ không chiếm phím tắt lần hai; nó hiện lại cửa sổ đang chạy hoặc báo chương trình đã mở.
 
@@ -35,8 +36,9 @@ Cách dùng
 Phím tắt
 - Alt+Shift+Q: bật hoặc tắt.
 - Alt+Q: điền đáp án khi đang bật.
-- Ctrl+Alt+Shift+Q: thoát hẳn, kể cả khi cửa sổ đang ẩn. Cùng tác dụng với Thoát trên menu khay: nhả mọi phím tắt, xóa biểu tượng, dừng câu trả lời chưa điền, rồi thoát. Không xóa khóa, không xóa log, không đóng trình duyệt, không nộp form.
-- Nếu một phím bị chương trình khác giữ, cửa sổ báo tên phím đó. Menu Thoát vẫn dùng được.
+- Phím 1 ở hàng phím trên (phím số cùng hàng với 2, 3, 4): thoát hẳn, kể cả khi cửa sổ đang ẩn. Không dùng phím 1 trên bàn phím số (numpad). Phím này có thể thoát khi bạn đang gõ số.
+- Thoát bằng phím 1 cùng tác dụng với Thoát trên menu khay: nhả mọi phím tắt, xóa biểu tượng, dừng câu trả lời chưa điền, rồi thoát. Không xóa khóa, không xóa log, không đóng trình duyệt, không nộp form.
+- Nếu Windows từ chối phím 1, cửa sổ báo rõ. Khi đó chỉ dùng menu Thoát. Chương trình không gắn thêm hook bàn phím.
 - Bấm phím thoát nhiều lần không chạy thoát hai lần.
 
 Tắt công cụ khác với thoát
@@ -48,11 +50,11 @@ Cần có sẵn
 - Microsoft Edge hoặc Google Chrome đã cài. File exe không kèm trình duyệt.
 
 Kiểm tra sau khi bấm X
-1. Mở Task Manager. Tiến trình AIQuizForms-tray-v3.exe phải còn. Các bản exe cũ không được còn.
+1. Mở Task Manager. Tiến trình AIQuizForms-tray-v3b.exe phải còn. Các bản exe cũ không được còn.
 2. Cạnh đồng hồ vẫn còn biểu tượng Trợ lý điền Google Form.
 3. Bấm đúp biểu tượng: cửa sổ hiện lại.
 4. Alt+Q khi đang bật: chương trình vẫn nhận phím. Mở file %AppData%\AIQuizForms\status.log, sẽ có dòng hotkey-answer. File này không chứa khóa API, nội dung form, hay câu trả lời của mô hình.
-5. Ctrl+Alt+Shift+Q, hoặc chuột phải biểu tượng rồi chọn Thoát: biểu tượng biến mất và tiến trình không còn trong Task Manager.
+5. Bấm phím 1 hàng trên, hoặc chuột phải biểu tượng rồi chọn Thoát: biểu tượng biến mất và tiến trình không còn trong Task Manager. Phím 1 trên numpad không thoát.
 
 Bản exe được dịch sang Windows 64-bit và đã kiểm tra định dạng file PE32+.
 Chưa bấm thử nút X, khay, hay phím tắt trên một máy Windows thật trong lần đóng gói này.

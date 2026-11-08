@@ -764,7 +764,7 @@ func startupStatus(cfg config.File) string {
 	}
 	return state + ". Dán khóa Groq vào ô mật, bấm Lưu cài đặt, rồi Mở cửa sổ Google Form. " +
 		"Bạn tự đăng nhập Google trong cửa sổ đó nếu cần. Alt+Shift+Q bật/tắt. Alt+Q điền đáp án. " +
-		"Ctrl+Alt+Shift+Q thoát hẳn, kể cả khi cửa sổ đang ẩn. " +
+		"Bấm phím 1 ở hàng trên (không phải phím số cạnh mũi tên) để thoát hẳn, kể cả khi cửa sổ đang ẩn. " +
 		"Bấm X để ẩn xuống khay cạnh đồng hồ; chuột phải biểu tượng để chọn Thoát. " +
 		"Nếu phím đã bị chương trình khác giữ, hãy dùng các nút. Công cụ không tự bấm Gửi hoặc Tiếp."
 }
@@ -793,7 +793,7 @@ func hotkeyMods(hk traylife.Hotkey) uintptr {
 func registerKeys(hwnd uintptr) {
 	var blocked []string
 	for _, hk := range traylife.Hotkeys() {
-		ok, _, _ := procRegisterHotKey.Call(hwnd, uintptr(hk.ID), hotkeyMods(hk), vkQ)
+		ok, _, _ := procRegisterHotKey.Call(hwnd, uintptr(hk.ID), hotkeyMods(hk), uintptr(hk.VK))
 		if ok == 0 {
 			blocked = append(blocked, hk.Label)
 		}
@@ -802,7 +802,7 @@ func registerKeys(hwnd uintptr) {
 		return
 	}
 	ui.note("hotkey-conflict")
-	ui.setStatus(startupStatus(ui.cfg) + " Phím bị chương trình khác giữ: " + strings.Join(blocked, ", ") + ". Menu khay Thoát vẫn dùng được.")
+	ui.setStatus(startupStatus(ui.cfg) + " Windows không nhận phím tắt: " + strings.Join(blocked, ", ") + ". Menu khay Thoát vẫn dùng được. Phím số (numpad) không được đăng ký.")
 }
 
 func unregisterAllHotkeys(hwnd uintptr) {
@@ -992,7 +992,7 @@ func (a *app) showTrayMenu() {
 		appendItem(menu, idTrayToggle, "Đang tắt — chọn để bật")
 	}
 	procAppendMenu.Call(menu, mfSeparator, 0, 0)
-	appendItem(menu, idTrayExit, "Thoát (Ctrl+Alt+Shift+Q)")
+	appendItem(menu, idTrayExit, "Thoát (phím 1 hàng trên)")
 	procSetForeground.Call(a.hwnd)
 	var pt point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))

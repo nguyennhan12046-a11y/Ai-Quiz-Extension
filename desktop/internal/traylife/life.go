@@ -51,23 +51,24 @@ func EndProcess(explicitExit bool) bool {
 }
 
 // Hotkey is a global shortcut owned by the hidden message window.
+// VK is the Windows virtual-key code. Exit uses top-row 1 (0x31), not numpad 1 (0x61).
 type Hotkey struct {
 	ID     int
 	Alt    bool
 	Shift  bool
 	Ctrl   bool
-	Key    string
+	VK     uint32
 	Action string
 	Label  string
 }
 
 // Hotkeys are the only global shortcuts this app registers.
-// Alt+Q answers, Alt+Shift+Q toggles, Ctrl+Alt+Shift+Q exits.
+// Alt+Q answers, Alt+Shift+Q toggles, and the plain top-row 1 key exits.
 func Hotkeys() []Hotkey {
 	return []Hotkey{
-		{ID: 1, Alt: true, Shift: true, Key: "Q", Action: "toggle", Label: "Alt+Shift+Q"},
-		{ID: 2, Alt: true, Key: "Q", Action: "answer", Label: "Alt+Q"},
-		{ID: 3, Ctrl: true, Alt: true, Shift: true, Key: "Q", Action: "exit", Label: "Ctrl+Alt+Shift+Q"},
+		{ID: 1, Alt: true, Shift: true, VK: 0x51, Action: "toggle", Label: "Alt+Shift+Q"},
+		{ID: 2, Alt: true, VK: 0x51, Action: "answer", Label: "Alt+Q"},
+		{ID: 3, VK: 0x31, Action: "exit", Label: "phím 1 hàng trên"},
 	}
 }
 

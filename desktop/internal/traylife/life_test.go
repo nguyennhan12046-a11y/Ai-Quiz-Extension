@@ -48,9 +48,6 @@ func TestHotkeysKeepAnswerToggleAndAddQuit(t *testing.T) {
 	got := map[string]Hotkey{}
 	seen := map[int]bool{}
 	for _, hk := range Hotkeys() {
-		if hk.Key != "Q" {
-			t.Fatalf("unexpected key %+v", hk)
-		}
 		if seen[hk.ID] {
 			t.Fatalf("duplicate id %d", hk.ID)
 		}
@@ -64,16 +61,19 @@ func TestHotkeysKeepAnswerToggleAndAddQuit(t *testing.T) {
 		t.Fatalf("actions = %d", len(got))
 	}
 	toggle := got["toggle"]
-	if !toggle.Alt || !toggle.Shift || toggle.Ctrl || toggle.Label != "Alt+Shift+Q" {
+	if !toggle.Alt || !toggle.Shift || toggle.Ctrl || toggle.VK != 0x51 || toggle.Label != "Alt+Shift+Q" {
 		t.Fatalf("toggle changed: %+v", toggle)
 	}
 	answer := got["answer"]
-	if !answer.Alt || answer.Shift || answer.Ctrl || answer.Label != "Alt+Q" {
+	if !answer.Alt || answer.Shift || answer.Ctrl || answer.VK != 0x51 || answer.Label != "Alt+Q" {
 		t.Fatalf("answer changed: %+v", answer)
 	}
 	exitKey := got["exit"]
-	if !exitKey.Ctrl || !exitKey.Alt || !exitKey.Shift || exitKey.Label != "Ctrl+Alt+Shift+Q" {
-		t.Fatalf("exit shortcut: %+v", exitKey)
+	if exitKey.Ctrl || exitKey.Alt || exitKey.Shift || exitKey.VK != 0x31 {
+		t.Fatalf("exit must be unmodified top-row 1, got %+v", exitKey)
+	}
+	if exitKey.VK == 0x61 {
+		t.Fatal("numpad 1 must not be the exit key")
 	}
 	ids := ReleaseIDs()
 	if len(ids) != len(Hotkeys()) {
