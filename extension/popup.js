@@ -8,6 +8,7 @@ const statusText = $("#statusText");
 const btnDetect = $("#btnDetect");
 const btnAnswer = $("#btnAnswer");
 const btnClear = $("#btnClear");
+const btnEnabled = $("#btnEnabled");
 const progress = $("#progress");
 const logEl = $("#log");
 
@@ -20,6 +21,21 @@ const openaiBaseUrlInput = $("#openaiBaseUrl");
 const openaiModelInput = $("#openaiModel");
 
 let detectedQuestions = [];
+let assistantEnabled = true;
+
+function applyEnabledUI(enabled) {
+  assistantEnabled = enabled !== false;
+  btnEnabled.textContent = assistantEnabled ? "Enabled — click to turn off" : "Disabled — click to turn on";
+  btnEnabled.setAttribute("aria-pressed", assistantEnabled ? "true" : "false");
+  btnEnabled.disabled = false;
+  btnDetect.disabled = !assistantEnabled;
+  if (!assistantEnabled) {
+    detectedQuestions = [];
+    btnAnswer.disabled = true;
+    progress.textContent = "Assistant is off";
+    setStatus(false, "Assistant is off");
+  }
+}
 
 function setStatus(ok, text) {
   statusDot.className = `status-dot ${ok ? "on" : "off"}`;
@@ -53,6 +69,10 @@ function getProviderConfig() {
 }
 
 async function checkConnection() {
+  if (!assistantEnabled) {
+    setStatus(false, "Assistant is off");
+    return false;
+  }
   const provider = getProvider();
   if (provider === "openai") {
     const key = openaiKeyInput.value.trim();
@@ -118,6 +138,8 @@ async function callBackendViaBackground(payload) {
     chrome.runtime.sendMessage({ action: "callBackend", payload }, (resp) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
+      } else if (resp && resp.disabled) {
+        resolve(resp);
       } else if (resp.error) {
         reject(new Error(resp.error));
       } else {
@@ -128,6 +150,7 @@ async function callBackendViaBackground(payload) {
 }
 
 btnDetect.addEventListener("click", async () => {
+  if (!assistantEnabled) return;
   try {
     progress.textContent = "Detecting...";
     btnDetect.disabled = true;
@@ -154,12 +177,13 @@ btnDetect.addEventListener("click", async () => {
     progress.textContent = "Detection failed";
     log(`Error: ${err.message}`);
   } finally {
-    btnDetect.disabled = false;
+    btnDetect.disabled = !assistantEnabled;
+    if (!assistantEnabled) btnAnswer.disabled = true;
   }
 });
 
 btnAnswer.addEventListener("click", async () => {
-  if (!detectedQuestions.length) return;
+  if (!assistantEnabled || !detectedQuestions.length) return;
 
   try {
     progress.textContent = "Asking AI...";
@@ -172,6 +196,19 @@ btnAnswer.addEventListener("click", async () => {
       config,
       questions: detectedQuestions,
     });
+    if (!assistantEnabled || response.disabled || response.aborted) {
+      progress.textContent = "Assistant is off";
+      log("Turned off before answers were filled in");
+      return;
+    }
+
+    const enabledNow = await sendToTab({ action: "getEnabled" });
+    if (!enabledNow || enabledNow.enabled === false) {
+      applyEnabledUI(false);
+      progress.textContent = "Assistant is off";
+      log("Turned off before answers were filled in");
+      return;
+    }
 
     await sendToTab({ action: "answer", answers: response.answers });
     progress.textContent = `Answered ${response.answers.length} question(s)`;
@@ -180,8 +217,23 @@ btnAnswer.addEventListener("click", async () => {
     progress.textContent = "Answering failed";
     log(`Error: ${err.message}`);
   } finally {
-    btnAnswer.disabled = false;
-    btnDetect.disabled = false;
+    btnDetect.disabled = !assistantEnabled;
+    btnAnswer.disabled = !assistantEnabled || !detectedQuestions.length;
+  }
+});
+
+btnEnabled.addEventListener("click", async () => {
+  const next = !assistantEnabled;
+  btnEnabled.disabled = true;
+  try {
+    await chrome.storage.local.set({ enabled: next });
+    await sendToTab({ action: "setEnabled", enabled: next });
+    applyEnabledUI(next);
+    log(next ? "Assistant enabled" : "Assistant disabled");
+    if (next) await checkConnection();
+  } catch (err) {
+    log(`Error: ${err.message}`);
+    btnEnabled.disabled = false;
   }
 });
 
@@ -222,9 +274,10 @@ providerSelect.addEventListener("change", async () => {
 
 (async () => {
   const stored = await chrome.storage.local.get([
-    "provider", "backendUrl", "openaiKey", "openaiBaseUrl", "openaiModel",
+    "provider", "backendUrl", "openaiKey", "openaiBaseUrl", "openaiModel", "enabled",
   ]);
 
+  applyEnabledUI(stored.enabled !== false);
   if (stored.provider) providerSelect.value = stored.provider;
   backendInput.value = stored.backendUrl || "";
   if (stored.openaiKey) openaiKeyInput.value = stored.openaiKey;

@@ -61,6 +61,11 @@
       text-align: center;
       min-height: 16px;
     }
+    .hint {
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1.35;
+    }
     .settings {
       border-top: 1px solid #e2e8f0;
       padding: 10px 16px;
@@ -126,6 +131,9 @@
       <span class="status-dot off" id="statusDot"></span>
       <span id="statusText">Checking...</span>
     </div>
+
+    <button class="btn btn-outline" id="btnEnabled" type="button" aria-pressed="true">Enabled — click to turn off</button>
+    <p class="hint" id="enabledHint">Pauses Detect, Answer, and Alt+Q. This does not uninstall the extension. Use Edge’s extension switch for a full off.</p>
 
     <button class="btn btn-primary" id="btnDetect">Detect Questions</button>
     <button class="btn btn-success" id="btnAnswer" disabled>Answer All</button>

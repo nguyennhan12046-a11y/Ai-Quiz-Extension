@@ -764,33 +764,7 @@
     return assignIds(formsBlocks.concat(nativeBlocks));
   }
 
-  // ─── HIGHLIGHT / ANSWER INJECTION ───
-
-  function highlightBlocks(blocks) {
-    blocks.forEach((block) => {
-      const el = block.element;
-      el.classList.add("aia-highlight");
-      el.style.position = el.style.position || "relative";
-      if (!el.querySelector(".aia-question-badge")) {
-        const badge = document.createElement("span");
-        badge.className = "aia-question-badge";
-        badge.textContent = block.id;
-        el.appendChild(badge);
-      }
-    });
-  }
-
-  function clearHighlights() {
-    document.querySelectorAll(".aia-highlight, .aia-answered").forEach((el) => {
-      el.classList.remove("aia-highlight", "aia-answered");
-    });
-    document.querySelectorAll(".aia-question-badge").forEach((b) => b.remove());
-  }
-
-  function markAnswered(block) {
-    block.element.classList.remove("aia-highlight");
-    block.element.classList.add("aia-answered");
-  }
+  // Answers are written only into the form controls. Nothing is drawn on the page.
 
   function isAriaWidget(el, role) {
     return !!el && el.tagName !== "INPUT" && el.tagName !== "SELECT" && el.getAttribute && el.getAttribute("role") === role;
@@ -969,9 +943,7 @@
     log(`  Injecting: ${block.id} (${block.type}) <- "${text}"`);
 
     if (block.type === "text") {
-      const result = applyText(block, normText(text));
-      if (result.ok) markAnswered(block);
-      return result;
+      return applyText(block, normText(text));
     }
 
     const first = block.inputs && block.inputs[0];
@@ -981,9 +953,7 @@
         log(`  -> Invalid checkbox answer "${text}"`);
         return { ok: false, error: "Invalid option" };
       }
-      const result = isAriaWidget(first, "checkbox") ? applyAriaCheckboxes(block, indexes) : applyNativeCheckboxes(block, indexes);
-      if (result.ok) markAnswered(block);
-      return result;
+      return isAriaWidget(first, "checkbox") ? applyAriaCheckboxes(block, indexes) : applyNativeCheckboxes(block, indexes);
     }
 
     if (block.type === "multiple_choice" || block.type === "button_choice" || block.type === "select") {
@@ -996,7 +966,6 @@
       if (block.type === "select") result = applySelect(block, index);
       else if (isAriaWidget(first, "radio")) result = applyAriaRadio(block, index);
       else result = applyLegacyClick(block, index);
-      if (result.ok) markAnswered(block);
       return result;
     }
 
@@ -1048,17 +1017,11 @@
 
     switch (msg.action) {
       case "detect": {
-        clearHighlights();
         try {
           detectedBlocks = detectQuestionBlocks();
         } catch (err) {
           log("ERROR in detectQuestionBlocks:", err.message, err.stack);
           detectedBlocks = [];
-        }
-        try {
-          highlightBlocks(detectedBlocks);
-        } catch (err) {
-          log("ERROR highlighting:", err.message);
         }
         const questions = detectedBlocks.map((block) => ({
           id: block.id,
@@ -1079,7 +1042,6 @@
         break;
       }
       case "clear": {
-        clearHighlights();
         detectedBlocks = [];
         sendResponse({ ok: true });
         break;

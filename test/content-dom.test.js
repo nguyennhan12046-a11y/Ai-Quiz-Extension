@@ -38,6 +38,10 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function assertNoExtensionChrome(doc) {
+  assert.equal(doc.querySelectorAll(".aia-highlight, .aia-answered, .aia-question-badge, [class*='aia-']").length, 0);
+}
+
 function send(page, msg) {
   const responses = [];
   for (const fn of page.listeners) {
@@ -193,7 +197,9 @@ test("source does not call a model, submit a form, or replace the message protoc
 
 test("Google Forms fixture finds MCQ, checkbox, and safe text in option order", () => {
   const page = createPage(formsHtml());
+  const beforeHtml = page.document.body.innerHTML;
   const detected = send(page, { action: "detect" });
+  assert.equal(page.document.body.innerHTML, beforeHtml);
   assert.equal(detected.count, 6, JSON.stringify(detected.questions));
   assert.equal(detected.questions.length, 6);
   assert.deepEqual(Object.keys(detected).sort(), ["count", "questions"]);
@@ -221,10 +227,7 @@ test("Google Forms fixture finds MCQ, checkbox, and safe text in option order", 
   assert.equal(page.document.querySelectorAll("button").length, 1);
   assert.equal(page.document.querySelectorAll("#aia-popup, .aia-fab, [data-aia-ui]").length, 0);
 
-  const capital = page.document.getElementById("q-capital");
-  assert.ok(capital.classList.contains("aia-highlight"));
-  assert.equal(capital.querySelector(".aia-question-badge").textContent, "q_0");
-  assert.equal(capital.querySelector(".aia-question-badge").className, "aia-question-badge");
+  assertNoExtensionChrome(page.document);
 });
 
 test("answers click the scoped Forms control once and do not submit or advance", () => {
@@ -297,7 +300,7 @@ test("answers click the scoped Forms control once and do not submit or advance",
   assert.equal(eventsOn(events, submit).length, 0);
   assert.equal(eventsOn(events, next).length, 0);
   assert.equal(eventsOn(events, tiep).length, 0);
-  assert.ok(page.document.getElementById("q-capital").classList.contains("aia-answered"));
+  assertNoExtensionChrome(page.document);
   assert.equal(detected.questions[0].options.includes("96"), false);
   assert.equal(detected.questions[1].options.includes("Hà Nội"), false);
 
@@ -352,8 +355,7 @@ test("invalid, partial, and unknown answers are not reported as success", () => 
   assert.equal(badLetter.results[0].error, "Invalid option");
   assert.equal(eventsOn(events, hanoi).length, 0);
   assert.equal(hanoi.getAttribute("aria-checked"), "false");
-  assert.ok(page.document.getElementById("q-capital").classList.contains("aia-highlight"));
-  assert.equal(page.document.getElementById("q-capital").classList.contains("aia-answered"), false);
+  assertNoExtensionChrome(page.document);
 
   const multiLetter = send(page, { action: "answer", answers: [{ id: "q_0", answer: "A,B" }] });
   assert.equal(multiLetter.ok, false);
@@ -388,8 +390,7 @@ test("invalid, partial, and unknown answers are not reported as success", () => 
   assert.equal(hanoi.getAttribute("aria-checked"), "true");
   assert.equal(water.getAttribute("aria-checked"), "false");
   assert.equal(eventsOn(events, water).length, 0);
-  assert.ok(page.document.getElementById("q-capital").classList.contains("aia-answered"));
-  assert.ok(page.document.getElementById("q-water").classList.contains("aia-highlight"));
+  assertNoExtensionChrome(page.document);
 });
 
 test("clear removes highlights and detection state without changing answers", () => {
@@ -409,9 +410,11 @@ test("clear removes highlights and detection state without changing answers", ()
   assert.equal(hanoi.getAttribute("aria-checked"), "true");
   assert.equal(input.value, "Natri");
 
+  const htmlBeforeClear = page.document.body.innerHTML;
   const cleared = send(page, { action: "clear" });
   assert.deepEqual(plain(cleared), { ok: true });
-  assert.equal(page.document.querySelectorAll(".aia-highlight, .aia-answered, .aia-question-badge").length, 0);
+  assert.equal(page.document.body.innerHTML, htmlBeforeClear);
+  assertNoExtensionChrome(page.document);
   assert.equal(hanoi.getAttribute("aria-checked"), "true");
   assert.equal(input.value, "Natri");
 
@@ -561,7 +564,7 @@ test("native quiz regression still detects and answers every original control", 
   assert.equal(page.document.getElementById("q4").value, "4");
   assert.equal(page.document.getElementById("q5").value, "1945");
   assert.equal(page.document.getElementById("q6").value, "Hypertext Transfer Protocol");
-  assert.ok(page.document.querySelector("input[value='paris']").closest("fieldset").classList.contains("aia-answered"));
+  assertNoExtensionChrome(page.document);
 });
 
 test("button-choice detection still wins and a numeric text answer is accepted", () => {
