@@ -26,6 +26,7 @@ import (
 	"aiquizforms/internal/forms"
 	"aiquizforms/internal/gate"
 	"aiquizforms/internal/groq"
+	"aiquizforms/internal/status"
 	"aiquizforms/internal/traylife"
 	pagejs "aiquizforms/page"
 )
@@ -82,8 +83,6 @@ const (
 	imageIcon          = 1
 	lrShared           = 0x8000
 	errorAlreadyExists = 183
-	mbYesNo            = 0x00000004
-	idYes              = 6
 
 	idKey        = 101
 	idBase       = 102
@@ -95,6 +94,7 @@ const (
 	idAnswer     = 205
 	idClear      = 206
 	idStartTray  = 207
+	idExit       = 208
 	idStatus     = 301
 	idTrayShow   = 401
 	idTrayToggle = 402
@@ -178,9 +178,6 @@ type app struct {
 	key          uintptr
 	base         uintptr
 	model        uintptr
-	toggle       uintptr
-	detectBtn    uintptr
-	answerBtn    uintptr
 	status       uintptr
 	font         uintptr
 	cfg          config.File
@@ -239,17 +236,14 @@ func main() {
 	if err := ui.createUI(); err != nil {
 		fail(err.Error())
 	}
-	registerKeys(ui.msgHwnd)
+	blocked := registerKeys(ui.msgHwnd)
 	ui.taskbarMsg = registerTaskbarMessage()
-	if err := ui.addTray(); err != nil {
-		ui.trayReady = false
-		ui.setStatus("Không tạo được biểu tượng cạnh đồng hồ. Cửa sổ được giữ lại. " + err.Error() + " " + startupStatus(ui.cfg))
-	} else {
-		if traylife.ShouldStartHidden(ui.cfg.StartInTray, true) {
-			ui.hideToTray()
-		}
-		ui.setStatus(startupStatus(ui.cfg))
+	trayErr := ui.addTray()
+	canHide := trayErr == nil && traylife.ExitKeyAvailable(blocked)
+	if traylife.ShouldStartHidden(ui.cfg.StartInTray, canHide) {
+		ui.hideToTray()
 	}
+	ui.setStatus(ui.startupReport(blocked, trayErr))
 	var m msg
 	for {
 		r, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
@@ -297,7 +291,7 @@ func (a *app) createUI() error {
 		uintptr(unsafe.Pointer(uiClass)),
 		uintptr(unsafe.Pointer(utf16("Trợ lý điền Google Form"))),
 		wsOverlappedWindow|wsVisible,
-		uintptr(0x80000000), uintptr(0x80000000), 720, 680,
+		uintptr(0x80000000), uintptr(0x80000000), 720, 560,
 		0, 0, a.inst, 0,
 	)
 	if hwnd == 0 {
@@ -402,17 +396,13 @@ func (a *app) createControls(hwnd uintptr) {
 		procSendMessage.Call(a.startTray, 0x00F1, 1, 0)
 	}
 	mkButton(hwnd, idSave, "Lưu cài đặt", 16, 232, 200, 34)
-	mkButton(hwnd, idOpen, "Mở cửa sổ Google Form", 228, 232, 250, 34)
-	a.toggle = mkButton(hwnd, idToggle, toggleText(a.cfg.Enabled), 16, 276, 300, 34)
-	a.detectBtn = mkButton(hwnd, idDetect, "Tìm câu hỏi", 328, 276, 160, 34)
-	a.answerBtn = mkButton(hwnd, idAnswer, "Điền đáp án", 500, 276, 176, 34)
-	mkButton(hwnd, idClear, "Xóa trạng thái phát hiện", 16, 320, 280, 34)
-	a.status = mkEdit(hwnd, idStatus, 16, 366, 660, 230, esMultiline|esReadOnly|esAutoVScroll|wsVScroll)
+	mkButton(hwnd, idOpen, "Mở cửa sổ Google Form", 228, 232, 280, 34)
+	mkButton(hwnd, idExit, "Thoát hẳn", 520, 232, 156, 34)
+	a.status = mkEdit(hwnd, idStatus, 16, 280, 660, 200, esMultiline|esReadOnly|esAutoVScroll|wsVScroll)
 	setText(a.key, a.cfg.APIKey)
 	setText(a.base, a.cfg.BaseURL)
 	setText(a.model, a.cfg.Model)
-	a.applyEnabledButtons()
-	for _, h := range []uintptr{a.key, a.base, a.model, a.startTray, a.toggle, a.detectBtn, a.answerBtn, a.status} {
+	for _, h := range []uintptr{a.key, a.base, a.model, a.startTray, a.status} {
 		procSendMessage.Call(h, wmSetFont, a.font, 1)
 	}
 }
@@ -438,6 +428,8 @@ func (a *app) onCommand(id int) {
 		go a.runAnswer(cfg)
 	case idClear:
 		go a.clearState()
+	case idExit:
+		a.exitApp()
 	case idTrayShow:
 		a.showFromTray()
 	case idTrayToggle:
@@ -478,8 +470,6 @@ func (a *app) toggleEnabled() {
 	}
 	a.cfg.StartInTray = a.startTrayChecked()
 	_ = a.cfg.Save()
-	setText(a.toggle, toggleText(a.cfg.Enabled))
-	a.applyEnabledButtons()
 	if a.cfg.Enabled {
 		a.setStatus("Đã bật. Alt+Q điền đáp án. Tắt không hoàn tiền cho yêu cầu đã gửi đi.")
 	} else {
@@ -487,18 +477,9 @@ func (a *app) toggleEnabled() {
 	}
 }
 
-func (a *app) applyEnabledButtons() {
-	on := uintptr(0)
-	if a.gate.Enabled() {
-		on = 1
-	}
-	procEnableWindow.Call(a.detectBtn, on)
-	procEnableWindow.Call(a.answerBtn, on)
-}
-
 func (a *app) openBrowser() {
 	if err := a.ensureBrowser(true); err != nil {
-		a.setStatus(config.Redact(err.Error(), a.cfg.APIKey))
+		a.report(status.Err(status.Browser))
 		return
 	}
 	a.setStatus("Đã mở cửa sổ trình duyệt riêng. Hãy tự đăng nhập Google nếu được hỏi, rồi mở đúng bài Google Form. Công cụ không vượt đăng nhập.")
@@ -510,23 +491,23 @@ func (a *app) runDetect(cfg config.File) {
 		return
 	}
 	if err := a.ensureBrowser(false); err != nil {
-		a.setStatus(config.Redact(err.Error(), cfg.APIKey))
+		a.report(status.Err(status.Browser))
 		return
 	}
 	target, err := a.formTarget()
 	if err != nil {
-		a.setStatus(err.Error())
+		a.report(err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := a.inject(ctx, target.WebSocketDebuggerURL); err != nil {
-		a.setStatus("Không đọc được trang: " + config.Redact(err.Error(), cfg.APIKey))
+		a.report(status.Err(status.NoForm))
 		return
 	}
 	raw, err := browser.Evaluate(ctx, target.WebSocketDebuggerURL, "globalThis.__AIA_DESKTOP_API__.detect()")
 	if err != nil {
-		a.setStatus("Không tìm được câu hỏi: " + config.Redact(err.Error(), cfg.APIKey))
+		a.report(status.Err(status.NoQuestions))
 		return
 	}
 	var detected struct {
@@ -534,7 +515,7 @@ func (a *app) runDetect(cfg config.File) {
 		Questions []fill.Question `json:"questions"`
 	}
 	if err := json.Unmarshal(raw, &detected); err != nil {
-		a.setStatus("Kết quả tìm câu hỏi không hợp lệ.")
+		a.report(status.Err(status.Parse))
 		return
 	}
 	a.mu.Lock()
@@ -555,27 +536,27 @@ func (a *app) runAnswer(cfg config.File) {
 	defer cancel()
 	err := fill.RunFill(ctx, a.gate, gen, func(ctx context.Context) ([]fill.Answer, error) {
 		if err := a.ensureBrowser(false); err != nil {
-			return nil, err
+			return nil, status.Err(status.Browser)
 		}
 		target, err := a.formTarget()
 		if err != nil {
 			return nil, err
 		}
 		if err := a.inject(ctx, target.WebSocketDebuggerURL); err != nil {
-			return nil, err
+			return nil, status.Err(status.NoForm)
 		}
 		raw, err := browser.Evaluate(ctx, target.WebSocketDebuggerURL, "globalThis.__AIA_DESKTOP_API__.detect()")
 		if err != nil {
-			return nil, err
+			return nil, status.Err(status.NoQuestions)
 		}
 		var detected struct {
 			Questions []fill.Question `json:"questions"`
 		}
 		if err := json.Unmarshal(raw, &detected); err != nil {
-			return nil, err
+			return nil, status.Err(status.Parse)
 		}
 		if len(detected.Questions) == 0 {
-			return nil, errors.New("không có câu hỏi để điền")
+			return nil, status.Err(status.NoQuestions)
 		}
 		a.mu.Lock()
 		a.questions = detected.Questions
@@ -605,7 +586,7 @@ func (a *app) runAnswer(cfg config.File) {
 			return err
 		}
 		if !result.OK {
-			return errors.New("một số đáp án không khớp với các lựa chọn")
+			return status.Err(status.NoMatch)
 		}
 		return nil
 	})
@@ -617,7 +598,7 @@ func (a *app) runAnswer(cfg config.File) {
 		a.setStatus("Đã bỏ câu trả lời này vì công cụ đang tắt hoặc bạn vừa tắt. Không hoàn phí nếu nhà cung cấp đã nhận yêu cầu.")
 		return
 	}
-	a.setStatus(config.Redact(err.Error(), cfg.APIKey))
+	a.report(err)
 }
 
 func (a *app) clearState() {
@@ -700,17 +681,17 @@ func (a *app) formTarget() (*browser.Target, error) {
 	port := a.port
 	a.mu.Unlock()
 	if port == 0 {
-		return nil, errors.New("hãy bấm Mở cửa sổ Google Form trước")
+		return nil, status.Err(status.NoForm)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	targets, err := browser.ListTargets(ctx, port)
 	if err != nil {
-		return nil, errors.New("không đọc được cửa sổ trình duyệt riêng")
+		return nil, status.Err(status.NoForm)
 	}
 	target := browser.PickFormTarget(targets)
 	if target == nil || !forms.IsGoogleForm(target.URL) {
-		return nil, errors.New("hãy mở đúng một trang Google Form trong cửa sổ trình duyệt của công cụ. Công cụ không đọc trang khác.")
+		return nil, status.Err(status.NoForm)
 	}
 	return target, nil
 }
@@ -769,13 +750,6 @@ func startupStatus(cfg config.File) string {
 		"Nếu phím đã bị chương trình khác giữ, hãy dùng các nút. Công cụ không tự bấm Gửi hoặc Tiếp."
 }
 
-func toggleText(on bool) string {
-	if on {
-		return "Đang bật — bấm để tắt"
-	}
-	return "Đang tắt — bấm để bật"
-}
-
 func hotkeyMods(hk traylife.Hotkey) uintptr {
 	var mods uintptr
 	if hk.Alt {
@@ -790,19 +764,34 @@ func hotkeyMods(hk traylife.Hotkey) uintptr {
 	return mods
 }
 
-func registerKeys(hwnd uintptr) {
-	var blocked []string
+func registerKeys(hwnd uintptr) []traylife.Hotkey {
+	var blocked []traylife.Hotkey
 	for _, hk := range traylife.Hotkeys() {
 		ok, _, _ := procRegisterHotKey.Call(hwnd, uintptr(hk.ID), hotkeyMods(hk), uintptr(hk.VK))
 		if ok == 0 {
-			blocked = append(blocked, hk.Label)
+			blocked = append(blocked, hk)
 		}
 	}
-	if len(blocked) == 0 {
-		return
+	if len(blocked) > 0 {
+		ui.note("hotkey-conflict")
 	}
-	ui.note("hotkey-conflict")
-	ui.setStatus(startupStatus(ui.cfg) + " Windows không nhận phím tắt: " + strings.Join(blocked, ", ") + ". Menu khay Thoát vẫn dùng được. Phím số (numpad) không được đăng ký.")
+	return blocked
+}
+
+func (a *app) startupReport(blocked []traylife.Hotkey, trayErr error) string {
+	parts := []string{startupStatus(a.cfg)}
+	if len(blocked) > 0 {
+		labels := make([]string, 0, len(blocked))
+		for _, hk := range blocked {
+			labels = append(labels, hk.Label)
+		}
+		parts = append(parts, "Windows không nhận phím tắt: "+strings.Join(labels, ", ")+". Dùng nút Thoát hẳn trên cửa sổ này. Phím số (numpad) không được đăng ký.")
+	}
+	if trayErr != nil {
+		a.note("tray-add-fail")
+		parts = append(parts, "Không tạo được biểu tượng cạnh đồng hồ. Cửa sổ được giữ lại.")
+	}
+	return strings.Join(parts, " ")
 }
 
 func unregisterAllHotkeys(hwnd uintptr) {
@@ -911,17 +900,12 @@ func (a *app) showFromTray() {
 }
 
 func (a *app) keepWindowBecauseTrayFailed() {
-	procShowWindow.Call(a.hwnd, swShow)
-	a.windowHidden = false
-	answer, _, _ := procMessageBox.Call(
-		a.hwnd,
-		uintptr(unsafe.Pointer(utf16("Không tạo được biểu tượng cạnh đồng hồ, nên cửa sổ không được ẩn. Bấm Có để giữ cửa sổ. Bấm Không để thoát hẳn."))),
-		uintptr(unsafe.Pointer(utf16("Trợ lý Google Form"))),
-		mbYesNo,
-	)
-	if answer != idYes {
-		a.exitApp()
+	if a.hwnd != 0 {
+		procShowWindow.Call(a.hwnd, swShow)
+		procSetForeground.Call(a.hwnd)
 	}
+	a.windowHidden = false
+	a.setStatus("Không có biểu tượng khay nên cửa sổ không bị ẩn. Dùng nút Thoát hẳn. Nếu phím 1 hàng trên đã đăng ký, bấm phím đó cũng thoát.")
 }
 
 func (a *app) exitApp() {
@@ -968,6 +952,14 @@ func (a *app) note(event string) {
 	_ = diag.Append(dir, event, a.cfg.APIKey)
 }
 
+func (a *app) report(err error) {
+	if err == nil {
+		return
+	}
+	a.note(status.CodeOf(err))
+	a.setStatus(status.PublicText(err))
+}
+
 func (a *app) onTray(lparam uintptr) {
 	event := lparam & 0xFFFF
 	switch event {
@@ -988,21 +980,24 @@ func (a *app) showTrayMenu() {
 	appendItem(menu, idTrayShow, "Hiện cửa sổ")
 	if a.gate.Enabled() {
 		appendItem(menu, idTrayToggle, "Đang bật — chọn để tắt")
+		appendItem(menu, idDetect, "Tìm câu hỏi")
+		appendItem(menu, idAnswer, "Điền đáp án")
 	} else {
 		appendItem(menu, idTrayToggle, "Đang tắt — chọn để bật")
 	}
+	appendItem(menu, idClear, "Xóa trạng thái phát hiện")
 	procAppendMenu.Call(menu, mfSeparator, 0, 0)
 	appendItem(menu, idTrayExit, "Thoát (phím 1 hàng trên)")
-	procSetForeground.Call(a.hwnd)
+	procSetForeground.Call(a.msgHwnd)
 	var pt point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 	cmd, _, _ := procTrackPopupMenu.Call(
 		menu,
 		tpmRightAlign|tpmBottomAlign|tpmReturnCmd|tpmNoNotify,
 		uintptr(pt.X), uintptr(pt.Y),
-		0, a.hwnd, 0,
+		0, a.msgHwnd, 0,
 	)
-	procPostMessage.Call(a.hwnd, 0, 0, 0)
+	procPostMessage.Call(a.msgHwnd, 0, 0, 0)
 	if cmd != 0 {
 		a.onCommand(int(cmd))
 	}
@@ -1044,11 +1039,9 @@ func claimSingleInstance() bool {
 			procShowWindow.Call(hwnd, swRestore)
 			procSetForeground.Call(hwnd)
 		default:
-			procMessageBox.Call(0,
-				uintptr(unsafe.Pointer(utf16("Trợ lý điền Google Form đang chạy. Hãy nhìn biểu tượng cạnh đồng hồ, hoặc kết thúc tiến trình cũ trong Task Manager trước khi mở bản mới."))),
-				uintptr(unsafe.Pointer(utf16("Trợ lý Google Form"))),
-				0x40,
-			)
+			if dir, err := config.Dir(); err == nil {
+				_ = diag.Append(dir, "second-instance", "")
+			}
 		}
 		return false
 	}

@@ -81,6 +81,16 @@ func ActionFor(id int) string {
 	return ""
 }
 
+// ExitKeyAvailable reports whether the plain top-row exit key was registered.
+func ExitKeyAvailable(blocked []Hotkey) bool {
+	for _, hk := range blocked {
+		if hk.Action == "exit" {
+			return false
+		}
+	}
+	return true
+}
+
 // ReleaseIDs is every hotkey id that shutdown must unregister.
 func ReleaseIDs() []int {
 	ids := make([]int, 0, len(Hotkeys()))

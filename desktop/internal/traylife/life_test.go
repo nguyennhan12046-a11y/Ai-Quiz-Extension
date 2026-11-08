@@ -84,6 +84,12 @@ func TestHotkeysKeepAnswerToggleAndAddQuit(t *testing.T) {
 			t.Fatalf("release id %d != %d", ids[i], hk.ID)
 		}
 	}
+	if !ExitKeyAvailable(nil) {
+		t.Fatal("no conflicts should leave the exit key available")
+	}
+	if ExitKeyAvailable([]Hotkey{got["exit"]}) {
+		t.Fatal("blocked exit key must stay visible as a failure")
+	}
 }
 
 func TestSecondInstanceDoesNotOwnHotkeys(t *testing.T) {

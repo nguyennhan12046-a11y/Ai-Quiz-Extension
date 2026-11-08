@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"aiquizforms/internal/config"
 	"aiquizforms/internal/fill"
+	"aiquizforms/internal/status"
 )
 
 type Client struct {
@@ -27,7 +29,7 @@ func (c *Client) httpClient() *http.Client {
 func (c *Client) Answer(ctx context.Context, cfg config.File, questions []fill.Question) ([]fill.Answer, error) {
 	cfg = cfg.Normalized()
 	if cfg.APIKey == "" {
-		return nil, errorsNoKey()
+		return nil, status.Err(status.NoKey)
 	}
 	body := map[string]any{
 		"model": cfg.Model,
@@ -50,15 +52,21 @@ func (c *Client) Answer(ctx context.Context, cfg config.File, questions []fill.Q
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("khong goi duoc API: %s", config.Redact(err.Error(), cfg.APIKey))
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, context.DeadlineExceeded
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			return nil, context.Canceled
+		}
+		return nil, status.Err(status.Network)
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, err
+		return nil, status.Err(status.Network)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("API tra loi %d: %s", resp.StatusCode, config.Redact(string(respBody), cfg.APIKey))
+		return nil, status.Err(status.HTTP)
 	}
 	var parsed struct {
 		Choices []struct {
@@ -67,18 +75,10 @@ func (c *Client) Answer(ctx context.Context, cfg config.File, questions []fill.Q
 			} `json:"message"`
 		} `json:"choices"`
 	}
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, fmt.Errorf("API khong tra JSON hop le")
+	if err := json.Unmarshal(respBody, &parsed); err != nil || len(parsed.Choices) == 0 {
+		return nil, status.Err(status.Parse)
 	}
-	if len(parsed.Choices) == 0 {
-		return nil, fmt.Errorf("API khong co cau tra loi")
-	}
-	answers := parseAnswers(parsed.Choices[0].Message.Content, questions)
-	return answers, nil
-}
-
-func errorsNoKey() error {
-	return fmt.Errorf("chua co khoa Groq")
+	return parseAnswers(parsed.Choices[0].Message.Content)
 }
 
 func buildPrompt(questions []fill.Question) string {
@@ -97,25 +97,25 @@ func buildPrompt(questions []fill.Question) string {
 	return b.String()
 }
 
-func parseAnswers(raw string, questions []fill.Question) []fill.Answer {
+func parseAnswers(raw string) ([]fill.Answer, error) {
 	start := strings.Index(raw, "[")
 	end := strings.LastIndex(raw, "]")
-	if start >= 0 && end > start {
-		var parsed []struct {
-			ID     string `json:"id"`
-			Answer any    `json:"answer"`
-		}
-		if json.Unmarshal([]byte(raw[start:end+1]), &parsed) == nil && len(parsed) > 0 {
-			out := make([]fill.Answer, 0, len(parsed))
-			for _, item := range parsed {
-				out = append(out, fill.Answer{ID: item.ID, Answer: fmt.Sprint(item.Answer)})
-			}
-			return out
-		}
+	if start < 0 || end <= start {
+		return nil, status.Err(status.Parse)
 	}
-	out := make([]fill.Answer, 0, len(questions))
-	for _, q := range questions {
-		out = append(out, fill.Answer{ID: q.ID, Answer: ""})
+	var parsed []struct {
+		ID     string `json:"id"`
+		Answer any    `json:"answer"`
 	}
-	return out
+	if json.Unmarshal([]byte(raw[start:end+1]), &parsed) != nil || len(parsed) == 0 {
+		return nil, status.Err(status.Parse)
+	}
+	out := make([]fill.Answer, 0, len(parsed))
+	for _, item := range parsed {
+		if strings.TrimSpace(item.ID) == "" {
+			return nil, status.Err(status.Parse)
+		}
+		out = append(out, fill.Answer{ID: item.ID, Answer: strings.TrimSpace(fmt.Sprint(item.Answer))})
+	}
+	return out, nil
 }
