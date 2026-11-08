@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -24,6 +25,7 @@ import (
 	"aiquizforms/internal/forms"
 	"aiquizforms/internal/gate"
 	"aiquizforms/internal/groq"
+	"aiquizforms/internal/traylife"
 	pagejs "aiquizforms/page"
 )
 
@@ -48,29 +50,59 @@ const (
 	wmSetText          = 0x000C
 	wmHotkey           = 0x0312
 	wmAppStatus        = 0x8000 + 1
+	wmTray             = 0x8000 + 2
+	wmLButtonDblClk    = 0x0203
+	wmRButtonUp        = 0x0205
+	wmContextMenu      = 0x007B
 	modAlt             = 0x0001
 	modShift           = 0x0004
 	vkQ                = 0x51
+	swHide             = 0
 	swShow             = 5
+	swRestore          = 9
+	nimAdd             = 0
+	nimDelete          = 2
+	nimSetVersion      = 4
+	nifMessage         = 0x1
+	nifIcon            = 0x2
+	nifTip             = 0x4
+	notifyIconVersion4 = 4
+	mfString           = 0
+	mfSeparator        = 0x800
+	tpmRightAlign      = 0x0008
+	tpmBottomAlign     = 0x0020
+	tpmReturnCmd       = 0x0100
+	tpmNoNotify        = 0x0080
+	idiApplication     = 32512
+	imageIcon          = 1
+	lrShared           = 0x8000
+	errorAlreadyExists = 183
+	mbYesNo            = 0x00000004
+	idYes              = 6
 
-	idKey     = 101
-	idBase    = 102
-	idModel   = 103
-	idSave    = 201
-	idOpen    = 202
-	idToggle  = 203
-	idDetect  = 204
-	idAnswer  = 205
-	idClear   = 206
-	idStatus  = 301
-	hotToggle = 1
-	hotAnswer = 2
+	idKey        = 101
+	idBase       = 102
+	idModel      = 103
+	idSave       = 201
+	idOpen       = 202
+	idToggle     = 203
+	idDetect     = 204
+	idAnswer     = 205
+	idClear      = 206
+	idStartTray  = 207
+	idStatus     = 301
+	idTrayShow   = 401
+	idTrayToggle = 402
+	idTrayExit   = 403
+	hotToggle    = 1
+	hotAnswer    = 2
 )
 
 var (
 	user32              = windows.NewLazySystemDLL("user32.dll")
 	gdi32               = windows.NewLazySystemDLL("gdi32.dll")
 	kernel32            = windows.NewLazySystemDLL("kernel32.dll")
+	shell32             = windows.NewLazySystemDLL("shell32.dll")
 	procRegisterClassEx = user32.NewProc("RegisterClassExW")
 	procCreateWindowEx  = user32.NewProc("CreateWindowExW")
 	procDefWindowProc   = user32.NewProc("DefWindowProcW")
@@ -89,7 +121,20 @@ var (
 	procCreateFont      = gdi32.NewProc("CreateFontW")
 	procGetModule       = kernel32.NewProc("GetModuleHandleW")
 	procMessageBox      = user32.NewProc("MessageBoxW")
+	procLoadImage       = user32.NewProc("LoadImageW")
+	procFindWindow      = user32.NewProc("FindWindowW")
+	procSetForeground   = user32.NewProc("SetForegroundWindow")
+	procCreatePopupMenu = user32.NewProc("CreatePopupMenu")
+	procAppendMenu      = user32.NewProc("AppendMenuW")
+	procTrackPopupMenu  = user32.NewProc("TrackPopupMenu")
+	procDestroyMenu     = user32.NewProc("DestroyMenu")
+	procGetCursorPos    = user32.NewProc("GetCursorPos")
+	procRegisterWndMsg  = user32.NewProc("RegisterWindowMessageW")
+	procDestroyWindow   = user32.NewProc("DestroyWindow")
+	procCreateMutex     = kernel32.NewProc("CreateMutexW")
+	procShellNotify     = shell32.NewProc("Shell_NotifyIconW")
 	wndProcCB           = windows.NewCallback(wndProc)
+	trayIconID          = 1
 )
 
 type wndClass struct {
@@ -118,25 +163,30 @@ type msg struct {
 }
 
 type app struct {
-	mu         sync.Mutex
-	hwnd       uintptr
-	key        uintptr
-	base       uintptr
-	model      uintptr
-	toggle     uintptr
-	detectBtn  uintptr
-	answerBtn  uintptr
-	status     uintptr
-	font       uintptr
-	cfg        config.File
-	gate       *gate.Gate
-	cancel     context.CancelFunc
-	boot       sync.Mutex
-	port       int
-	cmd        *exec.Cmd
-	questions  []fill.Question
-	targetWS   string
-	statusText string
+	mu           sync.Mutex
+	hwnd         uintptr
+	key          uintptr
+	base         uintptr
+	model        uintptr
+	toggle       uintptr
+	detectBtn    uintptr
+	answerBtn    uintptr
+	status       uintptr
+	font         uintptr
+	cfg          config.File
+	gate         *gate.Gate
+	cancel       context.CancelFunc
+	boot         sync.Mutex
+	port         int
+	cmd          *exec.Cmd
+	questions    []fill.Question
+	targetWS     string
+	statusText   string
+	startTray    uintptr
+	trayReady    bool
+	windowHidden bool
+	taskbarMsg   uint32
+	mutexHandle  uintptr
 }
 
 var ui *app
@@ -147,6 +197,9 @@ func main() {
 		cfg = config.Default()
 	}
 	ui = &app{cfg: cfg.Normalized(), gate: gate.New(cfg.Enabled)}
+	if !claimSingleInstance() {
+		return
+	}
 	inst, _, _ := procGetModule.Call(0)
 	className := utf16("AIQuizFormsWindow")
 	title := utf16("Trợ lý điền Google Form")
@@ -175,7 +228,16 @@ func main() {
 	procShowWindow.Call(hwnd, swShow)
 	procUpdateWindow.Call(hwnd)
 	registerKeys(hwnd)
-	ui.setStatus(startupStatus(ui.cfg))
+	ui.taskbarMsg = registerTaskbarMessage()
+	if err := ui.addTray(); err != nil {
+		ui.trayReady = false
+		ui.setStatus("Không tạo được biểu tượng cạnh đồng hồ. Cửa sổ được giữ lại. " + err.Error() + " " + startupStatus(ui.cfg))
+	} else {
+		if traylife.ShouldStartHidden(ui.cfg.StartInTray, true) {
+			ui.hideToTray()
+		}
+		ui.setStatus(startupStatus(ui.cfg))
+	}
 	var m msg
 	for {
 		r, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
@@ -197,6 +259,14 @@ func wndProc(hwnd, message, wparam, lparam uintptr) uintptr {
 			ui.onCommand(int(wparam & 0xffff))
 		}
 		return 0
+	case wmClose:
+		switch traylife.DecideClose(ui.trayReady) {
+		case traylife.HideToTray:
+			ui.hideToTray()
+		default:
+			ui.keepWindowBecauseTrayFailed()
+		}
+		return 0
 	case wmHotkey:
 		if wparam == hotToggle {
 			ui.onCommand(idToggle)
@@ -204,14 +274,23 @@ func wndProc(hwnd, message, wparam, lparam uintptr) uintptr {
 			ui.onCommand(idAnswer)
 		}
 		return 0
+	case wmTray:
+		ui.onTray(lparam)
+		return 0
 	case wmAppStatus:
 		ui.paintStatus()
 		return 0
 	case wmDestroy:
+		ui.removeTray()
 		procUnregisterHot.Call(hwnd, hotToggle)
 		procUnregisterHot.Call(hwnd, hotAnswer)
+		ui.gate.Invalidate()
 		ui.stopWork()
 		procPostQuit.Call(0)
+		return 0
+	}
+	if ui.taskbarMsg != 0 && message == uintptr(ui.taskbarMsg) {
+		ui.restoreTrayAfterExplorer()
 		return 0
 	}
 	r, _, _ := procDefWindowProc.Call(hwnd, message, wparam, lparam)
@@ -233,18 +312,22 @@ func (a *app) createControls(hwnd uintptr) {
 	a.base = mkEdit(hwnd, idBase, 16, 98, 660, 28, esAutoHScroll)
 	mkLabel(hwnd, "Mô hình", 16, 136, 660, 22)
 	a.model = mkEdit(hwnd, idModel, 16, 160, 660, 28, esAutoHScroll)
-	mkButton(hwnd, idSave, "Lưu cài đặt", 16, 204, 200, 34)
-	mkButton(hwnd, idOpen, "Mở cửa sổ Google Form", 228, 204, 250, 34)
-	a.toggle = mkButton(hwnd, idToggle, toggleText(a.cfg.Enabled), 16, 250, 300, 34)
-	a.detectBtn = mkButton(hwnd, idDetect, "Tìm câu hỏi", 328, 250, 160, 34)
-	a.answerBtn = mkButton(hwnd, idAnswer, "Điền đáp án", 500, 250, 176, 34)
-	mkButton(hwnd, idClear, "Xóa trạng thái phát hiện", 16, 296, 280, 34)
-	a.status = mkEdit(hwnd, idStatus, 16, 346, 660, 250, esMultiline|esReadOnly|esAutoVScroll|wsVScroll)
+	a.startTray = mk(hwnd, "BUTTON", "Khởi động thu nhỏ xuống khay", wsChild|wsVisible|wsTabStop|0x0003, 16, 198, 420, 24, idStartTray)
+	if a.cfg.StartInTray {
+		procSendMessage.Call(a.startTray, 0x00F1, 1, 0)
+	}
+	mkButton(hwnd, idSave, "Lưu cài đặt", 16, 232, 200, 34)
+	mkButton(hwnd, idOpen, "Mở cửa sổ Google Form", 228, 232, 250, 34)
+	a.toggle = mkButton(hwnd, idToggle, toggleText(a.cfg.Enabled), 16, 276, 300, 34)
+	a.detectBtn = mkButton(hwnd, idDetect, "Tìm câu hỏi", 328, 276, 160, 34)
+	a.answerBtn = mkButton(hwnd, idAnswer, "Điền đáp án", 500, 276, 176, 34)
+	mkButton(hwnd, idClear, "Xóa trạng thái phát hiện", 16, 320, 280, 34)
+	a.status = mkEdit(hwnd, idStatus, 16, 366, 660, 230, esMultiline|esReadOnly|esAutoVScroll|wsVScroll)
 	setText(a.key, a.cfg.APIKey)
 	setText(a.base, a.cfg.BaseURL)
 	setText(a.model, a.cfg.Model)
 	a.applyEnabledButtons()
-	for _, h := range []uintptr{a.key, a.base, a.model, a.toggle, a.detectBtn, a.answerBtn, a.status} {
+	for _, h := range []uintptr{a.key, a.base, a.model, a.startTray, a.toggle, a.detectBtn, a.answerBtn, a.status} {
 		procSendMessage.Call(h, wmSetFont, a.font, 1)
 	}
 }
@@ -270,6 +353,12 @@ func (a *app) onCommand(id int) {
 		go a.runAnswer(cfg)
 	case idClear:
 		go a.clearState()
+	case idTrayShow:
+		a.showFromTray()
+	case idTrayToggle:
+		a.toggleEnabled()
+	case idTrayExit:
+		a.exitApp()
 	}
 }
 
@@ -279,6 +368,7 @@ func (a *app) readForm() config.File {
 	cfg.BaseURL = getText(a.base)
 	cfg.Model = getText(a.model)
 	cfg.Enabled = a.gate.Enabled()
+	cfg.StartInTray = a.startTrayChecked()
 	a.cfg = cfg.Normalized()
 	setText(a.base, a.cfg.BaseURL)
 	setText(a.model, a.cfg.Model)
@@ -294,6 +384,7 @@ func (a *app) toggleEnabled() {
 		a.gate.Enable()
 		a.cfg.Enabled = true
 	}
+	a.cfg.StartInTray = a.startTrayChecked()
 	_ = a.cfg.Save()
 	setText(a.toggle, toggleText(a.cfg.Enabled))
 	a.applyEnabledButtons()
@@ -581,6 +672,7 @@ func startupStatus(cfg config.File) string {
 	}
 	return state + ". Dán khóa Groq vào ô mật, bấm Lưu cài đặt, rồi Mở cửa sổ Google Form. " +
 		"Bạn tự đăng nhập Google trong cửa sổ đó nếu cần. Alt+Shift+Q bật/tắt. Alt+Q điền đáp án. " +
+		"Bấm X để ẩn xuống khay cạnh đồng hồ; chuột phải biểu tượng để chọn Thoát. " +
 		"Nếu phím đã bị chương trình khác giữ, hãy dùng các nút. Công cụ không tự bấm Gửi hoặc Tiếp."
 }
 
@@ -604,6 +696,202 @@ func registerKeys(hwnd uintptr) {
 		}
 		ui.setStatus(startupStatus(ui.cfg) + extra + " Các nút trong cửa sổ vẫn dùng được.")
 	}
+}
+
+type notifyIconData struct {
+	CbSize            uint32
+	HWnd              uintptr
+	UID               uint32
+	UFlags            uint32
+	UCallbackMessage  uint32
+	HIcon             uintptr
+	SzTip             [128]uint16
+	DwState           uint32
+	DwStateMask       uint32
+	SzInfo            [256]uint16
+	UTimeoutOrVersion uint32
+	SzInfoTitle       [64]uint16
+	DwInfoFlags       uint32
+	GuidItem          [16]byte
+	HBalloonIcon      uintptr
+}
+
+func (a *app) trayData() notifyIconData {
+	data := notifyIconData{
+		CbSize:           uint32(unsafe.Sizeof(notifyIconData{})),
+		HWnd:             a.hwnd,
+		UID:              uint32(trayIconID),
+		UFlags:           nifMessage | nifIcon | nifTip,
+		UCallbackMessage: wmTray,
+	}
+	tip, err := windows.UTF16FromString("Trợ lý điền Google Form")
+	if err == nil {
+		copy(data.SzTip[:], tip)
+	}
+	return data
+}
+
+func (a *app) addTray() error {
+	icon, _, _ := procLoadImage.Call(0, idiApplication, imageIcon, 0, 0, lrShared)
+	if icon == 0 {
+		return errors.New("không lấy được biểu tượng chuẩn của Windows")
+	}
+	data := a.trayData()
+	data.HIcon = icon
+	ok, _, callErr := procShellNotify.Call(nimAdd, uintptr(unsafe.Pointer(&data)))
+	if ok == 0 {
+		if callErr != nil && callErr.Error() != "The operation completed successfully." {
+			return errors.New("Shell_NotifyIcon thêm khay thất bại")
+		}
+		return errors.New("Shell_NotifyIcon thêm khay thất bại")
+	}
+	data.UTimeoutOrVersion = notifyIconVersion4
+	_, _, _ = procShellNotify.Call(nimSetVersion, uintptr(unsafe.Pointer(&data)))
+	a.trayReady = true
+	return nil
+}
+
+func (a *app) removeTray() {
+	if !a.trayReady || a.hwnd == 0 {
+		return
+	}
+	data := a.trayData()
+	_, _, _ = procShellNotify.Call(nimDelete, uintptr(unsafe.Pointer(&data)))
+	a.trayReady = false
+}
+
+func (a *app) hideToTray() {
+	procShowWindow.Call(a.hwnd, swHide)
+	a.windowHidden = true
+}
+
+func (a *app) showFromTray() {
+	procShowWindow.Call(a.hwnd, swRestore)
+	procShowWindow.Call(a.hwnd, swShow)
+	procSetForeground.Call(a.hwnd)
+	a.windowHidden = false
+}
+
+func (a *app) keepWindowBecauseTrayFailed() {
+	procShowWindow.Call(a.hwnd, swShow)
+	a.windowHidden = false
+	answer, _, _ := procMessageBox.Call(
+		a.hwnd,
+		uintptr(unsafe.Pointer(utf16("Không tạo được biểu tượng cạnh đồng hồ, nên cửa sổ không được ẩn. Bấm Có để giữ cửa sổ. Bấm Không để thoát hẳn."))),
+		uintptr(unsafe.Pointer(utf16("Trợ lý Google Form"))),
+		mbYesNo,
+	)
+	if answer != idYes {
+		a.exitApp()
+	}
+}
+
+func (a *app) exitApp() {
+	a.gate.Invalidate()
+	a.stopWork()
+	a.removeTray()
+	procDestroyWindow.Call(a.hwnd)
+}
+
+func (a *app) onTray(lparam uintptr) {
+	event := lparam & 0xFFFF
+	switch event {
+	case wmLButtonDblClk:
+		a.showFromTray()
+	case wmContextMenu, wmRButtonUp:
+		a.showTrayMenu()
+	}
+}
+
+func (a *app) showTrayMenu() {
+	menu, _, _ := procCreatePopupMenu.Call()
+	if menu == 0 {
+		a.showFromTray()
+		return
+	}
+	defer procDestroyMenu.Call(menu)
+	appendItem(menu, idTrayShow, "Hiện cửa sổ")
+	if a.gate.Enabled() {
+		appendItem(menu, idTrayToggle, "Đang bật — chọn để tắt")
+	} else {
+		appendItem(menu, idTrayToggle, "Đang tắt — chọn để bật")
+	}
+	procAppendMenu.Call(menu, mfSeparator, 0, 0)
+	appendItem(menu, idTrayExit, "Thoát")
+	procSetForeground.Call(a.hwnd)
+	var pt point
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+	cmd, _, _ := procTrackPopupMenu.Call(
+		menu,
+		tpmRightAlign|tpmBottomAlign|tpmReturnCmd|tpmNoNotify,
+		uintptr(pt.X), uintptr(pt.Y),
+		0, a.hwnd, 0,
+	)
+	procPostMessage.Call(a.hwnd, 0, 0, 0)
+	if cmd != 0 {
+		a.onCommand(int(cmd))
+	}
+}
+
+func (a *app) restoreTrayAfterExplorer() {
+	if !a.trayReady && !a.windowHidden {
+		return
+	}
+	a.trayReady = false
+	if err := a.addTray(); err != nil || !a.trayReady {
+		a.trayReady = false
+		if traylife.MustShowAfterTrayLoss(a.windowHidden, false) {
+			a.showFromTray()
+			a.setStatus("Windows vừa khởi động lại khay đồng hồ và biểu tượng chưa tạo lại được. Cửa sổ được hiện ra.")
+		}
+		return
+	}
+	if traylife.MustShowAfterTrayLoss(a.windowHidden, true) {
+		a.showFromTray()
+	}
+}
+
+func appendItem(menu uintptr, id int, text string) {
+	procAppendMenu.Call(menu, mfString, uintptr(id), uintptr(unsafe.Pointer(utf16(text))))
+}
+
+func claimSingleInstance() bool {
+	name := utf16(`Local\AIQuizForms`)
+	handle, _, errno := procCreateMutex.Call(0, 0, uintptr(unsafe.Pointer(name)))
+	if handle == 0 {
+		fail("Không tạo được khóa một phiên bản.")
+	}
+	ui.mutexHandle = handle
+	if errno == syscall.Errno(errorAlreadyExists) {
+		className := utf16("AIQuizFormsWindow")
+		hwnd, _, _ := procFindWindow.Call(uintptr(unsafe.Pointer(className)), 0)
+		switch traylife.SecondInstance(hwnd != 0) {
+		case traylife.ShowExistingWindow:
+			procShowWindow.Call(hwnd, swRestore)
+			procSetForeground.Call(hwnd)
+		default:
+			procMessageBox.Call(0,
+				uintptr(unsafe.Pointer(utf16("Trợ lý điền Google Form đang chạy. Hãy nhìn biểu tượng cạnh đồng hồ, hoặc kết thúc tiến trình cũ trong Task Manager trước khi mở bản mới."))),
+				uintptr(unsafe.Pointer(utf16("Trợ lý Google Form"))),
+				0x40,
+			)
+		}
+		return false
+	}
+	return true
+}
+
+func registerTaskbarMessage() uint32 {
+	msg, _, _ := procRegisterWndMsg.Call(uintptr(unsafe.Pointer(utf16("TaskbarCreated"))))
+	return uint32(msg)
+}
+
+func (a *app) startTrayChecked() bool {
+	if a.startTray == 0 {
+		return a.cfg.StartInTray
+	}
+	checked, _, _ := procSendMessage.Call(a.startTray, 0x00F0, 0, 0)
+	return checked == 1
 }
 
 func fileExists(path string) bool {

@@ -44,6 +44,13 @@ func (g *Gate) Disable() {
 	g.seq++
 }
 
+// Invalidate drops in-flight replies without changing the saved on/off setting.
+func (g *Gate) Invalidate() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.seq++
+}
+
 func (g *Gate) Enable() {
 	g.mu.Lock()
 	defer g.mu.Unlock()

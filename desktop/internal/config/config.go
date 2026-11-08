@@ -14,10 +14,11 @@ const (
 )
 
 type File struct {
-	Enabled bool   `json:"enabled"`
-	APIKey  string `json:"apiKey"`
-	BaseURL string `json:"baseUrl"`
-	Model   string `json:"model"`
+	Enabled     bool   `json:"enabled"`
+	APIKey      string `json:"apiKey"`
+	BaseURL     string `json:"baseUrl"`
+	Model       string `json:"model"`
+	StartInTray bool   `json:"startInTray"`
 }
 
 func Default() File {

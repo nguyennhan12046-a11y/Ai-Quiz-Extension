@@ -48,6 +48,29 @@ func TestDefaultAndRoundTripDoesNotEchoKey(t *testing.T) {
 	}
 }
 
+func TestOldConfigKeepsKeyWithoutStartInTray(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("APPDATA", dir)
+	folder := filepath.Join(dir, DirName)
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := []byte("{\n  \"enabled\": false,\n  \"apiKey\": \"gsk_keep_me\",\n  \"baseUrl\": \"https://api.groq.com/openai\",\n  \"model\": \"openai/gpt-oss-120b\"\n}\n")
+	if err := os.WriteFile(filepath.Join(folder, "config.json"), old, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.APIKey != "gsk_keep_me" || loaded.Enabled || loaded.StartInTray {
+		t.Fatalf("migration changed settings: %+v", loaded)
+	}
+	if loaded.BaseURL != DefaultBaseURL || loaded.Model != DefaultModel {
+		t.Fatalf("provider defaults changed: %+v", loaded)
+	}
+}
+
 func TestMissingFileDefaultsOn(t *testing.T) {
 	t.Setenv("APPDATA", t.TempDir())
 	cfg, err := Load()

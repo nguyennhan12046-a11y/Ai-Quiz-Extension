@@ -26,4 +26,8 @@ func TestOffBlocksAndOldGenerationCannotFillAfterOn(t *testing.T) {
 	if !ok || next == gen || !g.Allow(next) {
 		t.Fatal("a new action after enable should get a new generation")
 	}
+	g.Invalidate()
+	if !g.Enabled() || g.Allow(next) {
+		t.Fatal("invalidate must drop the reply and leave the switch on")
+	}
 }

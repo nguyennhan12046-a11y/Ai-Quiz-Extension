@@ -1,59 +1,47 @@
-TRỢ LÝ ĐIỀN GOOGLE FORM — HƯỚNG DẪN CHO WINDOWS
+TRỢ LÝ ĐIỀN GOOGLE FORM — BẢN KHAY HỆ THỐNG
 ================================================
 
-Đây là chương trình Windows riêng. Không cài tiện ích trình duyệt.
-Nó mở một cửa sổ Edge hoặc Chrome riêng, không gắn vào cửa sổ bạn đang dùng hàng ngày.
+File cần mở: AIQuizForms-tray.exe
+Đây là chương trình Windows riêng, không phải tiện ích trình duyệt.
+Nó mở một cửa sổ Edge hoặc Chrome riêng. Cửa sổ trình duyệt đó không bị ẩn.
 
-Bạn cần có sẵn
-- Windows 10 hoặc Windows 11, máy 64-bit
-- Microsoft Edge (nên dùng) hoặc Google Chrome đã cài
-- Internet
-- Khóa API Groq của chính bạn
+Chuyển từ bản cũ AIQuizForms.exe
+1. Nếu bản cũ đang mở, bấm nút X trên cửa sổ của nó. Bản cũ thoát hẳn khi bấm X, không nằm ở khay.
+2. Mở Task Manager (Ctrl+Shift+Esc), thẻ Processes. Nếu còn "AIQuizForms.exe", bấm chuột phải và chọn End task.
+3. Sau đó mới bấm đúp AIQuizForms-tray.exe.
+4. Không cần dán lại khóa Groq. Bản mới dùng cùng file %AppData%\AIQuizForms\config.json.
+5. Không chạy hai bản cùng lúc. Bản mới sẽ không chiếm phím tắt lần hai; nó hiện lại cửa sổ đang chạy hoặc báo chương trình đã mở.
 
-Chương trình không kèm trình duyệt. Không có khóa API bên trong file exe.
+Cách dùng
+1. Cửa sổ cài đặt hiện ra trước để bạn kiểm tra khóa.
+2. Ô khóa được che. Địa chỉ mặc định: https://api.groq.com/openai
+   Mô hình mặc định: openai/gpt-oss-120b
+3. Bấm Lưu cài đặt, rồi Mở cửa sổ Google Form.
+4. Tự đăng nhập Google nếu được hỏi. Chương trình không vượt đăng nhập.
+5. Mở đúng bài Google Form trong cửa sổ trình duyệt của công cụ.
+6. Tìm câu hỏi, rồi Điền đáp án. Không tự bấm Gửi hoặc Tiếp.
 
-Cài và mở
-1. Copy file AIQuizForms.exe vào một thư mục, ví dụ Desktop\AIQuizForms.
-2. Bấm đúp AIQuizForms.exe.
-3. Nếu Windows hỏi SmartScreen, chọn More info / Vẫn chạy. File do bạn tự dựng, không có chữ ký cửa hàng.
-4. Dán khóa Groq vào ô mật. Ô này che ký tự.
-5. Giữ địa chỉ API: https://api.groq.com/openai
-6. Giữ mô hình: openai/gpt-oss-120b
-   Hai dòng này sửa được nếu bạn muốn model khác trên cùng kiểu API OpenAI.
-7. Bấm Lưu cài đặt.
-8. Bấm Mở cửa sổ Google Form.
-9. Nếu Google hỏi đăng nhập hoặc xác minh, bạn tự làm trong cửa sổ đó. Chương trình không vượt đăng nhập.
-10. Mở đúng bài kiểm tra Google Form trong cửa sổ vừa mở.
-11. Bấm Tìm câu hỏi để xem có nhận được câu không.
-12. Bấm Điền đáp án để gọi Groq và điền. Chương trình không bấm Gửi hoặc Tiếp.
+Ẩn xuống khay đồng hồ
+- Bấm X: cửa sổ và nút trên thanh tác vụ biến mất, chương trình vẫn chạy, phím tắt vẫn dùng được.
+- Biểu tượng nằm cạnh đồng hồ, nhìn thấy bình thường. Không giấu khỏi Task Manager.
+- Bấm đúp biểu tượng, hoặc chuột phải rồi chọn Hiện cửa sổ, để mở lại.
+- Chuột phải: Hiện cửa sổ, Bật/Tắt, Thoát.
+- Thoát mới gỡ biểu tượng, nhả phím tắt, và dừng câu trả lời đang chờ. Không hoàn phí yêu cầu đã gửi.
+- Nếu Windows không tạo được biểu tượng, cửa sổ không bị ẩn. Một hộp thoại hỏi bạn giữ cửa sổ hay thoát.
+- Ô "Khởi động thu nhỏ xuống khay" là tùy chọn. Mặc định tắt, để lần đầu vẫn thấy ô nhập khóa. Bấm Lưu cài đặt nếu bạn chọn ô đó.
 
-Bật, tắt, phím tắt
-- Nút “Đang bật — bấm để tắt” / “Đang tắt — bấm để bật”.
+Phím tắt
 - Alt+Shift+Q: bật hoặc tắt.
 - Alt+Q: điền đáp án khi đang bật.
-- Nếu phím đã bị chương trình khác giữ (kể cả tiện ích cũ trong Edge), cửa sổ sẽ báo. Hãy dùng nút.
-- Tắt chỉ dừng việc gọi API và không điền câu trả lời đang chờ. Câu đã điền trên form vẫn còn.
-- Tắt không gỡ chương trình và không hoàn tiền cho yêu cầu Groq đã gửi đi.
-- Muốn tắt hẳn: đóng cửa sổ chương trình. Muốn gỡ: xóa file exe và thư mục %AppData%\AIQuizForms.
+- Nếu phím bị chương trình khác giữ, dùng nút hoặc menu khay.
 
-Khóa được lưu ở đâu
-- Chỉ trong file %AppData%\AIQuizForms\config.json trên máy bạn.
-- Không ghi khóa ra nhật ký của chương trình.
-- Khóa chỉ được gửi tới địa chỉ API bạn đã lưu khi bạn bấm Điền đáp án.
+Tắt công cụ khác với thoát
+- Tắt chỉ chặn lần gọi mới và không điền câu trả lời đang chờ. Ô đã điền trên form giữ nguyên.
+- Thoát mới dừng chương trình.
 
-Cửa sổ trình duyệt riêng
-- Hồ sơ nằm ở %AppData%\AIQuizForms\browser-profile.
-- Đây không phải hồ sơ Edge bạn dùng hàng ngày.
-- Lần sau mở lại, chương trình cố kết nối lại cửa sổ đó nếu nó còn chạy.
+Cần có sẵn
+- Windows 10 hoặc 11, 64-bit
+- Microsoft Edge hoặc Google Chrome đã cài. File exe không kèm trình duyệt.
 
-Không làm
-- Không tự nộp bài, không bấm Next/Tiếp.
-- Không điền email, tên, số điện thoại, hoặc câu đồng ý/liên hệ.
-- Không đọc trang nào khác ngoài Google Form trong cửa sổ của công cụ.
-- Không ẩn chương trình khỏi Task Manager.
-
-Nếu không thấy Edge/Chrome
-Hãy cài Microsoft Edge từ trang của Microsoft, rồi mở lại exe.
-
-Bản exe này được dịch trên Linux sang Windows 64-bit. Định dạng file đã được kiểm tra là PE32+ GUI x64.
-Chưa chạy thử trên một máy Windows thật trong lần đóng gói này.
+Bản exe được dịch sang Windows 64-bit và đã kiểm tra định dạng file PE32+.
+Chưa bấm thử khay hệ thống trên một máy Windows thật trong lần đóng gói này.
