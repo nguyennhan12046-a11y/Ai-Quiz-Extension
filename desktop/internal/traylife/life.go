@@ -43,3 +43,9 @@ func SecondInstance(foundWindow bool) SecondInstanceAction {
 	}
 	return WarnAlreadyRunning
 }
+
+// EndProcess reports whether this window destruction should stop the program.
+// Destroying the visible window is not an exit. Only the explicit Exit command is.
+func EndProcess(explicitExit bool) bool {
+	return explicitExit
+}

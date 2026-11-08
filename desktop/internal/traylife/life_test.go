@@ -35,6 +35,15 @@ func TestExplorerRestartUnhidesIfIconCannotReturn(t *testing.T) {
 	}
 }
 
+func TestVisibleWindowDestroyDoesNotEndProcess(t *testing.T) {
+	if EndProcess(false) {
+		t.Fatal("hiding or losing the visible window must not exit")
+	}
+	if !EndProcess(true) {
+		t.Fatal("explicit Exit should end the process")
+	}
+}
+
 func TestSecondInstanceDoesNotOwnHotkeys(t *testing.T) {
 	if SecondInstance(true) != ShowExistingWindow {
 		t.Fatal("existing window should be restored")

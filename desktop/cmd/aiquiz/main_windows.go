@@ -21,6 +21,7 @@ import (
 
 	"aiquizforms/internal/browser"
 	"aiquizforms/internal/config"
+	"aiquizforms/internal/diag"
 	"aiquizforms/internal/fill"
 	"aiquizforms/internal/forms"
 	"aiquizforms/internal/gate"
@@ -51,6 +52,9 @@ const (
 	wmHotkey           = 0x0312
 	wmAppStatus        = 0x8000 + 1
 	wmTray             = 0x8000 + 2
+	wmRecreate         = 0x8000 + 3
+	wmSysCommand       = 0x0112
+	scClose            = 0xF060
 	wmLButtonDblClk    = 0x0203
 	wmRButtonUp        = 0x0205
 	wmContextMenu      = 0x007B
@@ -165,6 +169,10 @@ type msg struct {
 type app struct {
 	mu           sync.Mutex
 	hwnd         uintptr
+	msgHwnd      uintptr
+	inst         uintptr
+	quitting     bool
+	creatingSink bool
 	key          uintptr
 	base         uintptr
 	model        uintptr
@@ -189,7 +197,11 @@ type app struct {
 	mutexHandle  uintptr
 }
 
-var ui *app
+var (
+	ui        *app
+	sinkClass = utf16("AIQuizFormsSink")
+	uiClass   = utf16("AIQuizFormsWindow")
+)
 
 func main() {
 	cfg, err := config.Load()
@@ -201,33 +213,31 @@ func main() {
 		return
 	}
 	inst, _, _ := procGetModule.Call(0)
-	className := utf16("AIQuizFormsWindow")
-	title := utf16("Trợ lý điền Google Form")
-	cls := wndClass{
-		Size:       uint32(unsafe.Sizeof(wndClass{})),
-		WndProc:    wndProcCB,
-		Instance:   windows.Handle(inst),
-		Background: windows.Handle(6),
-		ClassName:  className,
+	ui.inst = inst
+	if err := registerClass(inst, sinkClass, "AIQuizFormsSink"); err != nil {
+		fail(err.Error())
 	}
-	if r, _, err := procRegisterClassEx.Call(uintptr(unsafe.Pointer(&cls))); r == 0 {
-		fail("Khong tao duoc cua so: " + err.Error())
+	if err := registerClass(inst, uiClass, "AIQuizFormsWindow"); err != nil {
+		fail(err.Error())
 	}
-	hwnd, _, err := procCreateWindowEx.Call(
+	ui.creatingSink = true
+	msgHwnd, _, err := procCreateWindowEx.Call(
 		0,
-		uintptr(unsafe.Pointer(className)),
-		uintptr(unsafe.Pointer(title)),
-		wsOverlappedWindow|wsVisible,
-		uintptr(0x80000000), uintptr(0x80000000), 720, 680,
-		0, 0, inst, 0,
+		uintptr(unsafe.Pointer(sinkClass)),
+		0,
+		0,
+		0, 0, 0, 0,
+		hwndMessage(), 0, inst, 0,
 	)
-	if hwnd == 0 {
-		fail("Khong mo duoc cua so: " + err.Error())
+	ui.creatingSink = false
+	if msgHwnd == 0 {
+		fail("Không tạo được hàng đợi thông báo: " + err.Error())
 	}
-	ui.hwnd = hwnd
-	procShowWindow.Call(hwnd, swShow)
-	procUpdateWindow.Call(hwnd)
-	registerKeys(hwnd)
+	ui.msgHwnd = msgHwnd
+	if err := ui.createUI(); err != nil {
+		fail(err.Error())
+	}
+	registerKeys(ui.msgHwnd)
 	ui.taskbarMsg = registerTaskbarMessage()
 	if err := ui.addTray(); err != nil {
 		ui.trayReady = false
@@ -241,37 +251,99 @@ func main() {
 	var m msg
 	for {
 		r, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
-		if int32(r) == 0 || int32(r) == -1 {
-			break
+		if int32(r) == -1 {
+			ui.note("getmessage-error")
+			continue
+		}
+		if r == 0 {
+			if ui.quitting && traylife.EndProcess(true) {
+				break
+			}
+			ui.note("ignored-quit")
+			continue
+		}
+		if m.Message == wmHotkey {
+			ui.onHotkey(m.WParam)
+			continue
 		}
 		procTranslate.Call(uintptr(unsafe.Pointer(&m)))
 		procDispatch.Call(uintptr(unsafe.Pointer(&m)))
 	}
 }
 
+func registerClass(inst uintptr, className *uint16, name string) error {
+	cls := wndClass{
+		Size:       uint32(unsafe.Sizeof(wndClass{})),
+		WndProc:    wndProcCB,
+		Instance:   windows.Handle(inst),
+		Background: windows.Handle(6),
+		ClassName:  className,
+	}
+	if r, _, err := procRegisterClassEx.Call(uintptr(unsafe.Pointer(&cls))); r == 0 {
+		return errors.New("Không đăng ký được cửa sổ " + name + ": " + err.Error())
+	}
+	return nil
+}
+
+func hwndMessage() uintptr {
+	return ^uintptr(2)
+}
+
+func (a *app) createUI() error {
+	hwnd, _, err := procCreateWindowEx.Call(
+		0,
+		uintptr(unsafe.Pointer(uiClass)),
+		uintptr(unsafe.Pointer(utf16("Trợ lý điền Google Form"))),
+		wsOverlappedWindow|wsVisible,
+		uintptr(0x80000000), uintptr(0x80000000), 720, 680,
+		0, 0, a.inst, 0,
+	)
+	if hwnd == 0 {
+		return errors.New("Không mở được cửa sổ: " + err.Error())
+	}
+	a.hwnd = hwnd
+	procShowWindow.Call(hwnd, swShow)
+	procUpdateWindow.Call(hwnd)
+	a.windowHidden = false
+	return nil
+}
+
 func wndProc(hwnd, message, wparam, lparam uintptr) uintptr {
 	switch message {
 	case 0x0001: // WM_CREATE
+		if ui.creatingSink || hwnd == ui.msgHwnd {
+			return 0
+		}
+		ui.hwnd = hwnd
 		ui.createControls(hwnd)
 		return 0
+	case wmSysCommand:
+		if hwnd == ui.hwnd && (wparam&0xFFF0) == scClose {
+			ui.requestClose()
+			return 0
+		}
 	case wmCommand:
 		if (wparam >> 16) == 0 {
 			ui.onCommand(int(wparam & 0xffff))
 		}
 		return 0
 	case wmClose:
-		switch traylife.DecideClose(ui.trayReady) {
-		case traylife.HideToTray:
-			ui.hideToTray()
-		default:
-			ui.keepWindowBecauseTrayFailed()
+		if hwnd == ui.hwnd {
+			ui.requestClose()
+			return 0
 		}
 		return 0
 	case wmHotkey:
-		if wparam == hotToggle {
-			ui.onCommand(idToggle)
-		} else if wparam == hotAnswer {
-			ui.onCommand(idAnswer)
+		ui.onHotkey(wparam)
+		return 0
+	case wmRecreate:
+		if ui.hwnd == 0 && !ui.quitting {
+			wasHidden := ui.windowHidden
+			if err := ui.createUI(); err != nil {
+				ui.note("recreate-failed")
+			} else if wasHidden {
+				ui.hideToTray()
+			}
 		}
 		return 0
 	case wmTray:
@@ -281,12 +353,23 @@ func wndProc(hwnd, message, wparam, lparam uintptr) uintptr {
 		ui.paintStatus()
 		return 0
 	case wmDestroy:
-		ui.removeTray()
-		procUnregisterHot.Call(hwnd, hotToggle)
-		procUnregisterHot.Call(hwnd, hotAnswer)
-		ui.gate.Invalidate()
-		ui.stopWork()
-		procPostQuit.Call(0)
+		if hwnd == ui.msgHwnd {
+			if traylife.EndProcess(ui.quitting) {
+				procPostQuit.Call(0)
+			}
+			return 0
+		}
+		if hwnd == ui.hwnd {
+			ui.hwnd = 0
+			if traylife.EndProcess(ui.quitting) {
+				return 0
+			}
+			ui.note("ui-destroyed")
+			if ui.msgHwnd != 0 {
+				procPostMessage.Call(ui.msgHwnd, wmRecreate, 0, 0)
+			}
+			return 0
+		}
 		return 0
 	}
 	if ui.taskbarMsg != 0 && message == uintptr(ui.taskbarMsg) {
@@ -346,10 +429,10 @@ func (a *app) onCommand(id int) {
 	case idOpen:
 		go a.openBrowser()
 	case idDetect:
-		cfg := a.readForm()
+		cfg := a.currentConfig()
 		go a.runDetect(cfg)
 	case idAnswer:
-		cfg := a.readForm()
+		cfg := a.currentConfig()
 		go a.runAnswer(cfg)
 	case idClear:
 		go a.clearState()
@@ -360,6 +443,13 @@ func (a *app) onCommand(id int) {
 	case idTrayExit:
 		a.exitApp()
 	}
+}
+
+func (a *app) currentConfig() config.File {
+	if a.hwnd == 0 || a.key == 0 {
+		return a.cfg.Normalized()
+	}
+	return a.readForm()
 }
 
 func (a *app) readForm() config.File {
@@ -719,7 +809,7 @@ type notifyIconData struct {
 func (a *app) trayData() notifyIconData {
 	data := notifyIconData{
 		CbSize:           uint32(unsafe.Sizeof(notifyIconData{})),
-		HWnd:             a.hwnd,
+		HWnd:             a.msgHwnd,
 		UID:              uint32(trayIconID),
 		UFlags:           nifMessage | nifIcon | nifTip,
 		UCallbackMessage: wmTray,
@@ -760,16 +850,41 @@ func (a *app) removeTray() {
 	a.trayReady = false
 }
 
+func (a *app) requestClose() {
+	if a.hwnd != 0 && a.key != 0 {
+		a.cfg = a.readForm()
+	}
+	switch traylife.DecideClose(a.trayReady) {
+	case traylife.HideToTray:
+		a.hideToTray()
+		a.note("close-hide")
+	default:
+		a.note("close-keep-window")
+		a.keepWindowBecauseTrayFailed()
+	}
+}
+
 func (a *app) hideToTray() {
+	if a.hwnd == 0 {
+		a.windowHidden = true
+		return
+	}
 	procShowWindow.Call(a.hwnd, swHide)
 	a.windowHidden = true
 }
 
 func (a *app) showFromTray() {
+	if a.hwnd == 0 {
+		if err := a.createUI(); err != nil {
+			a.note("recreate-failed")
+			return
+		}
+	}
 	procShowWindow.Call(a.hwnd, swRestore)
 	procShowWindow.Call(a.hwnd, swShow)
 	procSetForeground.Call(a.hwnd)
 	a.windowHidden = false
+	a.note("show-window")
 }
 
 func (a *app) keepWindowBecauseTrayFailed() {
@@ -787,10 +902,45 @@ func (a *app) keepWindowBecauseTrayFailed() {
 }
 
 func (a *app) exitApp() {
+	if a.quitting {
+		return
+	}
+	a.quitting = true
+	a.note("exit")
 	a.gate.Invalidate()
 	a.stopWork()
 	a.removeTray()
-	procDestroyWindow.Call(a.hwnd)
+	procUnregisterHot.Call(a.msgHwnd, hotToggle)
+	procUnregisterHot.Call(a.msgHwnd, hotAnswer)
+	if a.hwnd != 0 {
+		procDestroyWindow.Call(a.hwnd)
+	}
+	if a.msgHwnd != 0 {
+		procDestroyWindow.Call(a.msgHwnd)
+	}
+	procPostQuit.Call(0)
+}
+
+func (a *app) onHotkey(id uintptr) {
+	if a.quitting {
+		return
+	}
+	switch id {
+	case hotToggle:
+		a.note("hotkey-toggle")
+		a.onCommand(idToggle)
+	case hotAnswer:
+		a.note("hotkey-answer")
+		a.onCommand(idAnswer)
+	}
+}
+
+func (a *app) note(event string) {
+	dir, err := config.Dir()
+	if err != nil {
+		return
+	}
+	_ = diag.Append(dir, event, a.cfg.APIKey)
 }
 
 func (a *app) onTray(lparam uintptr) {
@@ -863,8 +1013,7 @@ func claimSingleInstance() bool {
 	}
 	ui.mutexHandle = handle
 	if errno == syscall.Errno(errorAlreadyExists) {
-		className := utf16("AIQuizFormsWindow")
-		hwnd, _, _ := procFindWindow.Call(uintptr(unsafe.Pointer(className)), 0)
+		hwnd, _, _ := procFindWindow.Call(uintptr(unsafe.Pointer(uiClass)), 0)
 		switch traylife.SecondInstance(hwnd != 0) {
 		case traylife.ShowExistingWindow:
 			procShowWindow.Call(hwnd, swRestore)

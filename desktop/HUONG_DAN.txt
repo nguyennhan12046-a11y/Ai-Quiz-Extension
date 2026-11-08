@@ -1,14 +1,15 @@
 TRỢ LÝ ĐIỀN GOOGLE FORM — BẢN KHAY HỆ THỐNG
 ================================================
 
-File cần mở: AIQuizForms-tray.exe
+File cần mở: AIQuizForms-tray-v2.exe
+Không mở lại AIQuizForms.exe hay AIQuizForms-tray.exe.
 Đây là chương trình Windows riêng, không phải tiện ích trình duyệt.
 Nó mở một cửa sổ Edge hoặc Chrome riêng. Cửa sổ trình duyệt đó không bị ẩn.
 
 Chuyển từ bản cũ AIQuizForms.exe
 1. Nếu bản cũ đang mở, bấm nút X trên cửa sổ của nó. Bản cũ thoát hẳn khi bấm X, không nằm ở khay.
 2. Mở Task Manager (Ctrl+Shift+Esc), thẻ Processes. Nếu còn "AIQuizForms.exe", bấm chuột phải và chọn End task.
-3. Sau đó mới bấm đúp AIQuizForms-tray.exe.
+3. Sau đó mới bấm đúp AIQuizForms-tray-v2.exe.
 4. Không cần dán lại khóa Groq. Bản mới dùng cùng file %AppData%\AIQuizForms\config.json.
 5. Không chạy hai bản cùng lúc. Bản mới sẽ không chiếm phím tắt lần hai; nó hiện lại cửa sổ đang chạy hoặc báo chương trình đã mở.
 
@@ -43,5 +44,12 @@ Cần có sẵn
 - Windows 10 hoặc 11, 64-bit
 - Microsoft Edge hoặc Google Chrome đã cài. File exe không kèm trình duyệt.
 
+Kiểm tra sau khi bấm X
+1. Mở Task Manager. Tiến trình AIQuizForms-tray-v2.exe phải còn. Bản cũ AIQuizForms-tray.exe không được còn.
+2. Cạnh đồng hồ vẫn còn biểu tượng Trợ lý điền Google Form.
+3. Bấm đúp biểu tượng: cửa sổ hiện lại.
+4. Alt+Q khi đang bật: chương trình vẫn nhận phím. Mở file %AppData%\AIQuizForms\status.log, sẽ có dòng hotkey-answer. File này không chứa khóa API, nội dung form, hay câu trả lời của mô hình.
+5. Chuột phải biểu tượng, chọn Thoát: biểu tượng biến mất và tiến trình không còn trong Task Manager.
+
 Bản exe được dịch sang Windows 64-bit và đã kiểm tra định dạng file PE32+.
-Chưa bấm thử khay hệ thống trên một máy Windows thật trong lần đóng gói này.
+Chưa bấm thử nút X, khay, hay phím tắt trên một máy Windows thật trong lần đóng gói này.
