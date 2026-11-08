@@ -100,3 +100,33 @@ func TestSecondInstanceDoesNotOwnHotkeys(t *testing.T) {
 		t.Fatal("missing window should warn instead of starting another hotkey owner")
 	}
 }
+
+func TestHungWindowIsNotTreatedAsUsable(t *testing.T) {
+	if SecondInstanceState(true, true) != WarnAlreadyRunning {
+		t.Fatal("a Not Responding window must not be treated as a healthy instance")
+	}
+	if SecondInstanceState(true, false) != ShowExistingWindow {
+		t.Fatal("healthy window should be shown")
+	}
+	if SecondInstanceState(false, true) != WarnAlreadyRunning {
+		t.Fatal("missing window must not start a second hotkey owner")
+	}
+}
+
+func TestExitKeyIsNotRegisteredOnTheUIList(t *testing.T) {
+	if ExitUsesUIQueue() {
+		t.Fatal("exit must not depend on the UI message loop")
+	}
+	for _, hk := range UIHotkeys() {
+		if hk.Action == "exit" || hk.VK == 0x31 {
+			t.Fatalf("UI list includes exit: %+v", hk)
+		}
+	}
+	hk, ok := ExitHotkey()
+	if !ok || hk.VK != 0x31 || hk.Alt || hk.Shift || hk.Ctrl {
+		t.Fatalf("exit hotkey = %+v ok=%v", hk, ok)
+	}
+	if len(UIHotkeys()) != 2 {
+		t.Fatalf("ui hotkeys = %d", len(UIHotkeys()))
+	}
+}

@@ -1,18 +1,28 @@
-TRỢ LÝ ĐIỀN GOOGLE FORM — BẢN KHAY HỆ THỐNG
-================================================
+TRỢ LÝ ĐIỀN GOOGLE FORM — BẢN v3d
+==================================
 
-File cần mở: AIQuizForms-tray-v3c.exe
-Không mở AIQuizForms-tray-v3b.exe hay các bản exe cũ hơn.
+File cần mở: AIQuizForms-tray-v3d.exe
+Thanh tiêu đề cửa sổ phải kết thúc bằng v3d.
+Không mở AIQuizForms-tray-v3c.exe hay bất kỳ bản exe nào cũ hơn.
 Đây là chương trình Windows riêng, không phải tiện ích trình duyệt.
-Nó mở một cửa sổ Edge hoặc Chrome riêng. Cửa sổ trình duyệt đó không bị ẩn.
+Nó mở một cửa sổ Edge hoặc Chrome riêng. Cửa sổ trình duyệt đó không bị đóng khi thoát công cụ.
 
-Chuyển từ bản v2 (AIQuizForms-tray-v2.exe)
-1. Nếu cửa sổ v2 đang hiện, chuột phải biểu tượng cạnh đồng hồ và chọn Thoát. Bấm X chỉ ẩn bản v2, không thoát.
-2. Nếu không thấy cửa sổ, vẫn chuột phải biểu tượng cạnh đồng hồ và chọn Thoát.
-3. Mở Task Manager (Ctrl+Shift+Esc). Nếu còn AIQuizForms-tray-v3b.exe, AIQuizForms-tray-v2.exe hoặc AIQuizForms.exe, chọn End task.
-4. Sau đó mới bấm đúp AIQuizForms-tray-v3c.exe.
-5. Không cần dán lại khóa Groq. Bản mới dùng cùng file %AppData%\AIQuizForms\config.json.
-6. Không chạy hai bản cùng lúc. Bản mới sẽ không chiếm phím tắt lần hai; nó hiện lại cửa sổ đang chạy hoặc báo chương trình đã mở.
+Trước khi mở v3d
+1. Mở Task Manager (Ctrl+Shift+Esc). Kết thúc mọi tiến trình AIQuizForms, kể cả cửa sổ đang ghi Not Responding.
+2. Phím 1 của bản cũ không dừng được tiến trình khi cửa sổ đã treo. Bản v3d không tắt giúp tiến trình cũ đó.
+3. Sau khi Task Manager không còn tên AIQuizForms, mới bấm đúp AIQuizForms-tray-v3d.exe.
+4. Không cần dán lại khóa Groq. Bản mới dùng cùng file %AppData%\AIQuizForms\config.json.
+5. Nếu vẫn còn một bản đang chạy và cửa sổ còn phản hồi, lần mở sau chỉ hiện lại cửa sổ đó.
+6. Nếu bản đang chạy không phản hồi, lần mở sau không hiện cửa sổ treo đó và không tắt tiến trình kia. Một hộp thoại lúc khởi động nói rõ phải dùng phím 1 (nếu đó là v3d) hoặc Task Manager.
+
+Cách nhận đúng bản
+- Tiêu đề: Trợ lý điền Google Form — v3d
+- Cửa sổ chính chỉ có khóa (ô mật), địa chỉ API, mô hình, Lưu cài đặt, Mở cửa sổ Google Form, Thoát hẳn, và dòng trạng thái.
+- Không có nút Tìm câu hỏi, Điền đáp án, Xóa trạng thái trên cửa sổ. Những việc đó nằm trong menu chuột phải của khay.
+- Mở %AppData%\AIQuizForms\status.log. Dòng mới phải có dạng:
+  startup AIQUIZFORMS_BUILD=v3d exit=registered answer=registered toggle=registered
+- exit=failed có nghĩa Windows không nhận phím 1. Khi đó phím 1 không dừng chương trình. Dùng nút Thoát hẳn.
+- File log không chứa khóa API, nội dung form, hay câu trả lời của mô hình.
 
 Cách dùng
 1. Cửa sổ cài đặt hiện ra trước để bạn kiểm tra khóa.
@@ -21,42 +31,47 @@ Cách dùng
 3. Bấm Lưu cài đặt, rồi Mở cửa sổ Google Form.
 4. Tự đăng nhập Google nếu được hỏi. Chương trình không vượt đăng nhập.
 5. Mở đúng bài Google Form trong cửa sổ trình duyệt của công cụ.
-6. Tìm câu hỏi, rồi Điền đáp án. Không tự bấm Gửi hoặc Tiếp.
+6. Alt+Q để điền. Không tự bấm Gửi hoặc Tiếp.
 
-Ẩn xuống khay đồng hồ
-- Bấm X: cửa sổ và nút trên thanh tác vụ biến mất, chương trình vẫn chạy, phím tắt vẫn dùng được.
+Khay đồng hồ
+- Bấm X: cửa sổ và nút trên thanh tác vụ biến mất, chương trình vẫn chạy.
 - Biểu tượng nằm cạnh đồng hồ, nhìn thấy bình thường. Không giấu khỏi Task Manager.
 - Bấm đúp biểu tượng, hoặc chuột phải rồi chọn Hiện cửa sổ, để mở lại.
-- Cửa sổ chính chỉ có khóa, địa chỉ API, mô hình, Lưu, Mở cửa sổ Google Form và Thoát hẳn.
-- Chuột phải biểu tượng: Hiện cửa sổ, Bật/Tắt, Tìm câu hỏi, Điền đáp án, Xóa trạng thái, Thoát. Dùng menu này nếu phím tắt bị chương trình khác giữ.
-- Phím 1 hàng trên thoát ngay, không điền thêm câu trả lời.
-- Thoát mới gỡ biểu tượng, nhả phím tắt, và dừng câu trả lời đang chờ. Không hoàn phí yêu cầu đã gửi.
-- Nếu Windows không tạo được biểu tượng, cửa sổ không bị ẩn. Một hộp thoại hỏi bạn giữ cửa sổ hay thoát.
-- Ô "Khởi động thu nhỏ xuống khay" là tùy chọn. Mặc định tắt, để lần đầu vẫn thấy ô nhập khóa. Bấm Lưu cài đặt nếu bạn chọn ô đó.
+- Chuột phải: Hiện cửa sổ, Bật/Tắt, Tìm câu hỏi, Điền đáp án, Xóa trạng thái, Thoát.
+- Menu Thoát và nút Thoát hẳn là thoát thường khi cửa sổ còn phản hồi: gỡ biểu tượng, nhả phím tắt, dừng câu trả lời đang chờ.
+- Ô "Khởi động thu nhỏ xuống khay" là tùy chọn. Mặc định tắt. Bấm Lưu cài đặt nếu bạn chọn ô đó.
+- Nếu Windows không tạo được biểu tượng, cửa sổ không bị ẩn. Dòng trạng thái nói rõ. Không có hộp thoại cho lỗi này.
 
 Phím tắt
 - Alt+Shift+Q: bật hoặc tắt.
 - Alt+Q: điền đáp án khi đang bật.
-- Phím 1 ở hàng phím trên (phím số cùng hàng với 2, 3, 4): thoát hẳn, kể cả khi cửa sổ đang ẩn. Không dùng phím 1 trên bàn phím số (numpad). Phím này có thể thoát khi bạn đang gõ số.
-- Thoát bằng phím 1 cùng tác dụng với Thoát trên menu khay: nhả mọi phím tắt, xóa biểu tượng, dừng câu trả lời chưa điền, rồi thoát. Không xóa khóa, không xóa log, không đóng trình duyệt, không nộp form.
-- Nếu Windows từ chối phím 1, dòng trạng thái trong cửa sổ nói rõ. Khi đó dùng nút Thoát hẳn. Chương trình không gắn thêm hook bàn phím.
-- Lỗi mạng, API, không có form, hoặc đáp án không khớp chỉ hiện ở dòng trạng thái và file status.log. Cửa sổ không tự bật lên và không có hộp thoại lỗi. Khi bạn mở lại cửa sổ, dòng trạng thái vẫn còn.
-- Bấm phím thoát nhiều lần không chạy thoát hai lần.
+- Phím 1 ở hàng phím trên (cùng hàng với 2, 3, 4): dừng đúng tiến trình này ngay, kể cả khi cửa sổ đang ẩn hoặc tiêu đề ghi Not Responding.
+- Phím 1 trên bàn phím số (numpad) không được đăng ký.
+- Phím 1 không gửi lệnh thoát vào vòng lặp của cửa sổ. Cửa sổ treo không cần đọc phím đó.
+- Phím 1 không điền thêm, không bấm Gửi hoặc Tiếp, không đóng trình duyệt, không xóa config.json, không xóa status.log.
+- Gỡ biểu tượng khay là việc làm thêm. Nếu việc đó không xong kịp, tiến trình vẫn dừng. Biểu tượng có thể còn cạnh đồng hồ cho đến khi bạn đưa chuột lên nó; Windows sẽ xóa biểu tượng của tiến trình đã tắt.
+- Nếu exit=failed trong status.log, phím 1 không có tác dụng. Không có hook bàn phím thay thế.
+- Lỗi mạng, API, không có form, hoặc đáp án không khớp chỉ hiện ở dòng trạng thái và status.log. Cửa sổ không tự bật lên. Những lỗi đó không có hộp thoại.
+- Phím 1 không được hứa sẽ chạy nếu cả máy đã treo, hoặc nếu một bản cũ vẫn đang giữ phím đó.
 
-Tắt công cụ khác với thoát
-- Tắt chỉ chặn lần gọi mới và không điền câu trả lời đang chờ. Ô đã điền trên form giữ nguyên.
-- Thoát mới dừng chương trình.
+Tắt công cụ khác với dừng tiến trình
+- Tắt (Alt+Shift+Q) chỉ chặn lần gọi mới và không điền câu trả lời đang chờ. Ô đã điền trên form giữ nguyên.
+- Thoát ở menu hoặc nút Thoát hẳn dừng chương trình khi cửa sổ còn phản hồi.
+- Phím 1 dừng tiến trình kể cả khi cửa sổ không phản hồi.
 
 Cần có sẵn
 - Windows 10 hoặc 11, 64-bit
 - Microsoft Edge hoặc Google Chrome đã cài. File exe không kèm trình duyệt.
 
-Kiểm tra sau khi bấm X
-1. Mở Task Manager. Tiến trình AIQuizForms-tray-v3c.exe phải còn. Các bản exe cũ không được còn.
-2. Cạnh đồng hồ vẫn còn biểu tượng Trợ lý điền Google Form.
-3. Bấm đúp biểu tượng: cửa sổ hiện lại.
-4. Alt+Q khi đang bật: chương trình vẫn nhận phím. Mở file %AppData%\AIQuizForms\status.log, sẽ có dòng hotkey-answer. File này không chứa khóa API, nội dung form, hay câu trả lời của mô hình.
-5. Bấm phím 1 hàng trên, hoặc chuột phải biểu tượng rồi chọn Thoát: biểu tượng biến mất và tiến trình không còn trong Task Manager. Phím 1 trên numpad không thoát.
+Kiểm tra
+1. Task Manager không còn tiến trình AIQuizForms cũ trước khi mở v3d.
+2. Tiêu đề có v3d. status.log có startup AIQUIZFORMS_BUILD=v3d và exit=registered.
+3. Bấm X. Task Manager vẫn còn AIQuizForms-tray-v3d.exe. Biểu tượng vẫn ở cạnh đồng hồ.
+4. Bấm đúp biểu tượng: cửa sổ hiện lại.
+5. Alt+Q khi đang bật: status.log có dòng hotkey-answer.
+6. Bấm phím 1 hàng trên. Tiến trình AIQuizForms-tray-v3d.exe không còn trong Task Manager. Trình duyệt riêng vẫn mở. config.json vẫn còn.
+7. Nếu biểu tượng khay còn, đưa chuột lên biểu tượng. Windows xóa biểu tượng của tiến trình đã tắt.
+8. Phím 1 trên numpad không dừng chương trình.
 
 Bản exe được dịch sang Windows 64-bit và đã kiểm tra định dạng file PE32+.
-Chưa bấm thử nút X, khay, hay phím tắt trên một máy Windows thật trong lần đóng gói này.
+Phím 1 khi một luồng bị chặn đã được thử bằng tiến trình Windows chạy dưới Wine 9: RegisterHotKey cho phím 1 hàng trên trả về thành công, luồng kia nằm trong Sleep, thông báo thoát được đưa vào hàng đợi của luồng riêng, và tiến trình kết thúc bằng TerminateProcess trong khoảng 300 ms dù bước dọn khay cố tình ngủ 30 giây. Đó không phải gõ phím vật lý, và không phải cửa sổ Not Responding trên máy Windows của bạn.

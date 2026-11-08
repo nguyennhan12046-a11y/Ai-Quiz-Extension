@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,12 +21,14 @@ import (
 	"golang.org/x/sys/windows"
 
 	"aiquizforms/internal/browser"
+	"aiquizforms/internal/buildid"
 	"aiquizforms/internal/config"
 	"aiquizforms/internal/diag"
 	"aiquizforms/internal/fill"
 	"aiquizforms/internal/forms"
 	"aiquizforms/internal/gate"
 	"aiquizforms/internal/groq"
+	"aiquizforms/internal/lifecycle"
 	"aiquizforms/internal/status"
 	"aiquizforms/internal/traylife"
 	pagejs "aiquizforms/page"
@@ -129,6 +132,7 @@ var (
 	procMessageBox      = user32.NewProc("MessageBoxW")
 	procLoadImage       = user32.NewProc("LoadImageW")
 	procFindWindow      = user32.NewProc("FindWindowW")
+	procIsHung          = user32.NewProc("IsHungAppWindow")
 	procSetForeground   = user32.NewProc("SetForegroundWindow")
 	procCreatePopupMenu = user32.NewProc("CreatePopupMenu")
 	procAppendMenu      = user32.NewProc("AppendMenuW")
@@ -203,6 +207,7 @@ var (
 )
 
 func main() {
+	runtime.LockOSThread()
 	cfg, err := config.Load()
 	if err != nil {
 		cfg = config.Default()
@@ -236,7 +241,16 @@ func main() {
 	if err := ui.createUI(); err != nil {
 		fail(err.Error())
 	}
+	exitOK := false
+	if hk, ok := traylife.ExitHotkey(); ok {
+		exitOK = ui.watchExit(hk)
+	}
 	blocked := registerKeys(ui.msgHwnd)
+	if !exitOK {
+		if hk, ok := traylife.ExitHotkey(); ok {
+			blocked = append(blocked, hk)
+		}
+	}
 	ui.taskbarMsg = registerTaskbarMessage()
 	trayErr := ui.addTray()
 	canHide := trayErr == nil && traylife.ExitKeyAvailable(blocked)
@@ -245,10 +259,15 @@ func main() {
 	}
 	ui.setStatus(ui.startupReport(blocked, trayErr))
 	var m msg
+	var notedGetMessage bool
 	for {
 		r, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
 		if int32(r) == -1 {
-			ui.note("getmessage-error")
+			if !notedGetMessage {
+				notedGetMessage = true
+				ui.noteFixed("getmessage-error")
+			}
+			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 		if r == 0 {
@@ -289,7 +308,7 @@ func (a *app) createUI() error {
 	hwnd, _, err := procCreateWindowEx.Call(
 		0,
 		uintptr(unsafe.Pointer(uiClass)),
-		uintptr(unsafe.Pointer(utf16("Trợ lý điền Google Form"))),
+		uintptr(unsafe.Pointer(utf16(buildid.Title()))),
 		wsOverlappedWindow|wsVisible,
 		uintptr(0x80000000), uintptr(0x80000000), 720, 560,
 		0, 0, a.inst, 0,
@@ -743,11 +762,11 @@ func startupStatus(cfg config.File) string {
 	if !cfg.Enabled {
 		state = "Đang tắt"
 	}
-	return state + ". Dán khóa Groq vào ô mật, bấm Lưu cài đặt, rồi Mở cửa sổ Google Form. " +
+	return state + ". Bản " + buildid.ID + ". Dán khóa Groq vào ô mật, bấm Lưu cài đặt, rồi Mở cửa sổ Google Form. " +
 		"Bạn tự đăng nhập Google trong cửa sổ đó nếu cần. Alt+Shift+Q bật/tắt. Alt+Q điền đáp án. " +
-		"Bấm phím 1 ở hàng trên (không phải phím số cạnh mũi tên) để thoát hẳn, kể cả khi cửa sổ đang ẩn. " +
-		"Bấm X để ẩn xuống khay cạnh đồng hồ; chuột phải biểu tượng để chọn Thoát. " +
-		"Nếu phím đã bị chương trình khác giữ, hãy dùng các nút. Công cụ không tự bấm Gửi hoặc Tiếp."
+		"Phím 1 ở hàng trên (không phải numpad) dừng đúng tiến trình này, kể cả khi cửa sổ ghi Not Responding. " +
+		"Nút Thoát hẳn và menu Thoát là thoát thường khi cửa sổ còn phản hồi. " +
+		"Bấm X để ẩn xuống khay cạnh đồng hồ. Công cụ không tự bấm Gửi hoặc Tiếp."
 }
 
 func hotkeyMods(hk traylife.Hotkey) uintptr {
@@ -766,32 +785,52 @@ func hotkeyMods(hk traylife.Hotkey) uintptr {
 
 func registerKeys(hwnd uintptr) []traylife.Hotkey {
 	var blocked []traylife.Hotkey
-	for _, hk := range traylife.Hotkeys() {
+	for _, hk := range traylife.UIHotkeys() {
 		ok, _, _ := procRegisterHotKey.Call(hwnd, uintptr(hk.ID), hotkeyMods(hk), uintptr(hk.VK))
 		if ok == 0 {
 			blocked = append(blocked, hk)
 		}
 	}
-	if len(blocked) > 0 {
-		ui.note("hotkey-conflict")
-	}
 	return blocked
 }
 
 func (a *app) startupReport(blocked []traylife.Hotkey, trayErr error) string {
-	parts := []string{startupStatus(a.cfg)}
-	if len(blocked) > 0 {
-		labels := make([]string, 0, len(blocked))
-		for _, hk := range blocked {
-			labels = append(labels, hk.Label)
+	exitOK := traylife.ExitKeyAvailable(blocked)
+	answerOK := actionAvailable(blocked, "answer")
+	toggleOK := actionAvailable(blocked, "toggle")
+	line, err := lifecycle.Startup(buildid.Marker, exitOK, answerOK, toggleOK)
+	if err != nil {
+		line = "startup failed"
+	}
+	a.noteFixed(line)
+	parts := []string{startupStatus(a.cfg), line}
+	if !exitOK {
+		parts = append(parts, "Windows không đăng ký được phím 1. Phím 1 sẽ không dừng chương trình. Dùng nút Thoát hẳn. Không gắn hook bàn phím.")
+	}
+	var labels []string
+	for _, hk := range blocked {
+		if hk.Action == "exit" {
+			continue
 		}
-		parts = append(parts, "Windows không nhận phím tắt: "+strings.Join(labels, ", ")+". Dùng nút Thoát hẳn trên cửa sổ này. Phím số (numpad) không được đăng ký.")
+		labels = append(labels, hk.Label)
+	}
+	if len(labels) > 0 {
+		parts = append(parts, "Windows không nhận phím tắt: "+strings.Join(labels, ", ")+". Dùng menu khay cho các việc đó.")
 	}
 	if trayErr != nil {
-		a.note("tray-add-fail")
+		a.noteFixed("tray-add-fail")
 		parts = append(parts, "Không tạo được biểu tượng cạnh đồng hồ. Cửa sổ được giữ lại.")
 	}
 	return strings.Join(parts, " ")
+}
+
+func actionAvailable(blocked []traylife.Hotkey, action string) bool {
+	for _, hk := range blocked {
+		if hk.Action == action {
+			return false
+		}
+	}
+	return true
 }
 
 func unregisterAllHotkeys(hwnd uintptr) {
@@ -826,7 +865,7 @@ func (a *app) trayData() notifyIconData {
 		UFlags:           nifMessage | nifIcon | nifTip,
 		UCallbackMessage: wmTray,
 	}
-	tip, err := windows.UTF16FromString("Trợ lý điền Google Form")
+	tip, err := windows.UTF16FromString(buildid.Title())
 	if err == nil {
 		copy(data.SzTip[:], tip)
 	}
@@ -854,7 +893,7 @@ func (a *app) addTray() error {
 }
 
 func (a *app) removeTray() {
-	if !a.trayReady || a.hwnd == 0 {
+	if a.msgHwnd == 0 {
 		return
 	}
 	data := a.trayData()
@@ -939,9 +978,17 @@ func (a *app) onHotkey(id uintptr) {
 		a.note("hotkey-answer")
 		a.onCommand(idAnswer)
 	case "exit":
-		a.note("hotkey-exit")
-		a.exitApp()
+		a.noteFixed("hotkey-exit")
+		a.emergencyStop()
 	}
+}
+
+func (a *app) noteFixed(event string) {
+	dir, err := config.Dir()
+	if err != nil {
+		return
+	}
+	_ = diag.Append(dir, event, "")
 }
 
 func (a *app) note(event string) {
@@ -987,7 +1034,7 @@ func (a *app) showTrayMenu() {
 	}
 	appendItem(menu, idClear, "Xóa trạng thái phát hiện")
 	procAppendMenu.Call(menu, mfSeparator, 0, 0)
-	appendItem(menu, idTrayExit, "Thoát (phím 1 hàng trên)")
+	appendItem(menu, idTrayExit, "Thoát")
 	procSetForeground.Call(a.msgHwnd)
 	var pt point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -1034,14 +1081,22 @@ func claimSingleInstance() bool {
 	ui.mutexHandle = handle
 	if errno == syscall.Errno(errorAlreadyExists) {
 		hwnd, _, _ := procFindWindow.Call(uintptr(unsafe.Pointer(uiClass)), 0)
-		switch traylife.SecondInstance(hwnd != 0) {
+		hung := hwnd != 0 && isHung(hwnd)
+		switch traylife.SecondInstanceState(hwnd != 0, hung) {
 		case traylife.ShowExistingWindow:
 			procShowWindow.Call(hwnd, swRestore)
 			procSetForeground.Call(hwnd)
 		default:
-			if dir, err := config.Dir(); err == nil {
-				_ = diag.Append(dir, "second-instance", "")
+			event := "second-instance"
+			text := "Trợ lý điền Google Form đang chạy nhưng không thấy cửa sổ. Hãy nhìn biểu tượng cạnh đồng hồ. Nếu không có, kết thúc tiến trình trong Task Manager rồi mở lại bản " + buildid.ID + "."
+			if hung {
+				event = "second-instance-hung"
+				text = "Cửa sổ đang chạy không phản hồi. Bản " + buildid.ID + " không tắt tiến trình khác. Nếu tiến trình đó là bản " + buildid.ID + ", bấm phím 1 ở hàng trên. Nếu phím 1 không có tác dụng, kết thúc AIQuizForms trong Task Manager rồi mở lại."
 			}
+			if dir, err := config.Dir(); err == nil {
+				_ = diag.Append(dir, event, "")
+			}
+			procMessageBox.Call(0, uintptr(unsafe.Pointer(utf16(text))), uintptr(unsafe.Pointer(utf16(buildid.Title()))), 0x40)
 		}
 		return false
 	}
@@ -1118,7 +1173,12 @@ func utf16(s string) *uint16 {
 	return p
 }
 
+func isHung(hwnd uintptr) bool {
+	r, _, _ := procIsHung.Call(hwnd)
+	return r != 0
+}
+
 func fail(msg string) {
-	procMessageBox.Call(0, uintptr(unsafe.Pointer(utf16(msg))), uintptr(unsafe.Pointer(utf16("Trợ lý Google Form"))), 0x10)
+	procMessageBox.Call(0, uintptr(unsafe.Pointer(utf16(msg))), uintptr(unsafe.Pointer(utf16(buildid.Title()))), 0x10)
 	os.Exit(1)
 }

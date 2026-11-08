@@ -38,7 +38,13 @@ const (
 )
 
 func SecondInstance(foundWindow bool) SecondInstanceAction {
-	if foundWindow {
+	return SecondInstanceState(foundWindow, false)
+}
+
+// SecondInstanceState does not treat a Not Responding window as a usable copy.
+// The new process must not stop that other process.
+func SecondInstanceState(foundWindow, hung bool) SecondInstanceAction {
+	if foundWindow && !hung {
 		return ShowExistingWindow
 	}
 	return WarnAlreadyRunning
@@ -79,6 +85,36 @@ func ActionFor(id int) string {
 		}
 	}
 	return ""
+}
+
+// UIHotkeys are registered on the setup window's thread.
+// The exit key is absent: that thread may be the one Windows marks Not Responding.
+func UIHotkeys() []Hotkey {
+	all := Hotkeys()
+	out := make([]Hotkey, 0, len(all))
+	for _, hk := range all {
+		if hk.Action == "exit" {
+			continue
+		}
+		out = append(out, hk)
+	}
+	return out
+}
+
+// ExitHotkey is the plain top-row 1 key. It is registered on the exit-watch thread.
+func ExitHotkey() (Hotkey, bool) {
+	for _, hk := range Hotkeys() {
+		if hk.Action == "exit" {
+			return hk, true
+		}
+	}
+	return Hotkey{}, false
+}
+
+// ExitUsesUIQueue is false. Posting an exit message to the setup window is not
+// enough, because that window's thread may never read it.
+func ExitUsesUIQueue() bool {
+	return false
 }
 
 // ExitKeyAvailable reports whether the plain top-row exit key was registered.
