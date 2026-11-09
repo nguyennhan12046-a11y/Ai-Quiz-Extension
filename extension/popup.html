@@ -124,7 +124,7 @@
   </style>
 </head>
 <body>
-  <div class="header">AI Answer Assistant</div>
+  <div class="header">Dịch Anh - VIệt</div>
 
   <div class="body">
     <div class="status-row">
@@ -133,7 +133,8 @@
     </div>
 
     <button class="btn btn-outline" id="btnEnabled" type="button" aria-pressed="true">Enabled — click to turn off</button>
-    <p class="hint" id="enabledHint">Pauses Detect, Answer, and Alt+Q. This does not uninstall the extension. Use Edge’s extension switch for a full off.</p>
+    <p class="hint" id="enabledHint">Nút này chỉ tạm dừng trong tiện ích. Không gỡ và không tắt mục trong Edge.</p>
+    <p class="hint" id="disableKeyHint">Phím 1 hàng trên tắt hẳn tiện ích khi trang web đang được chọn và con trỏ không nằm trong ô nhập, textarea, hoặc vùng soạn thảo. Không chạy trên thanh địa chỉ, trang cài đặt Edge, hoặc khi Edge không được chọn. Không có phím tắt toàn cục. Bật lại bằng tay trong Tiện ích của Edge. Phím 1 bàn số không tắt.</p>
 
     <button class="btn btn-primary" id="btnDetect">Detect Questions</button>
     <button class="btn btn-success" id="btnAnswer" disabled>Answer All</button>
@@ -156,7 +157,7 @@
 
     <div class="field" id="fieldOpenAI">
       <label for="openaiKey">API Key</label>
-      <input type="password" id="openaiKey" placeholder="sk-..." />
+      <input type="password" id="openaiKey" placeholder="API key" />
 
       <label for="openaiBaseUrl">Base URL</label>
       <input type="text" id="openaiBaseUrl" placeholder="https://api.openai.com" />

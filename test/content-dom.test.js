@@ -10,9 +10,10 @@ const { JSDOM } = require("jsdom");
 const contentSource = fs.readFileSync(path.join(__dirname, "../extension/content.js"), "utf8");
 const quizHtml = fs.readFileSync(path.join(__dirname, "../test-quiz.html"), "utf8");
 
-function createPage(html, url = "https://example.com/quiz") {
+function createPage(html, url = "https://example.com/quiz", options = {}) {
   const dom = new JSDOM(html, { url, runScripts: "dangerously" });
   dom.window.console.log = () => {};
+  if (options.captureDisable) dom.window.__captureDisable = true;
   dom.window.eval(`
     var CSS = {
       escape(value) {
@@ -27,6 +28,12 @@ function createPage(html, url = "https://example.com/quiz") {
         }
       }
     };
+    if (globalThis.__captureDisable) {
+      chrome.runtime.sendMessage = function(msg, cb) {
+        (globalThis.__disableMessages = globalThis.__disableMessages || []).push(msg);
+        if (typeof cb === "function") cb({ ok: true });
+      };
+    }
     globalThis.__chromeListeners = chrome.runtime.onMessage.listeners;
   `);
   dom.window.eval(contentSource + "\n//# sourceURL=content.js");
@@ -617,4 +624,58 @@ test("button-choice detection still wins and a numeric text answer is accepted",
   const numeric = send(textPage, { action: "answer", answers: [{ id: "q_0", answer: 96 }] });
   assert.equal(numeric.ok, true);
   assert.equal(textPage.document.getElementById("product").value, "96");
+});
+
+function plainOne(target, extra = {}) {
+  return {
+    isTrusted: true,
+    repeat: false,
+    key: "1",
+    code: "Digit1",
+    ctrlKey: false,
+    altKey: false,
+    metaKey: false,
+    shiftKey: false,
+    target,
+    preventDefault() { this.defaultPrevented = true; },
+    stopPropagation() { this.stopped = true; },
+    ...extra,
+  };
+}
+
+test("top-row 1 asks only this extension to disable, and typing keeps the key", () => {
+  const page = createPage("<!DOCTYPE html><body><input id='field'><textarea id='area'></textarea><div id='edit' contenteditable='true'></div><p id='text'>Quiz</p></body>", "https://example.com/keys", { captureDisable: true });
+  const decide = page.window.__AIA_SHOULD_DISABLE__;
+  const field = page.document.getElementById("field");
+  const area = page.document.getElementById("area");
+  const edit = page.document.getElementById("edit");
+  const text = page.document.getElementById("text");
+  assert.equal(decide(plainOne(text)), true);
+  assert.equal(decide(plainOne(field)), false);
+  assert.equal(decide(plainOne(area)), false);
+  assert.equal(decide(plainOne(edit)), false);
+  assert.equal(decide(plainOne(text, { code: "Numpad1" })), false);
+  assert.equal(decide(plainOne(text, { shiftKey: true, key: "!" })), false);
+  assert.equal(decide(plainOne(text, { altKey: true })), false);
+  assert.equal(decide(plainOne(text, { isTrusted: false })), false);
+  assert.equal(decide(plainOne(text, { repeat: true })), false);
+
+  const messages = () => page.window.__disableMessages || [];
+  page.window.__AIA_ON_DISABLE_KEY__(plainOne(field));
+  assert.equal(messages().length, 0);
+  const accepted = plainOne(text);
+  page.window.__AIA_ON_DISABLE_KEY__(accepted);
+  assert.deepEqual(plain(messages()), [{ action: "disable-extension" }]);
+  assert.equal(accepted.defaultPrevented, true);
+  assert.equal(JSON.stringify(messages()).includes("id"), false);
+
+  const suspended = send(page, { action: "answer", answers: [{ id: "q_0", answer: "A" }] });
+  assert.equal(suspended.ok, false);
+  send(page, { action: "suspend-fill" });
+  const blocked = send(page, { action: "answer", answers: [{ id: "q_0", answer: "A" }] });
+  assert.equal(blocked.suspended, true);
+  assert.equal(blocked.ok, false);
+  send(page, { action: "resume-fill" });
+  const detected = send(page, { action: "detect" });
+  assert.equal(detected.suspended, undefined);
 });

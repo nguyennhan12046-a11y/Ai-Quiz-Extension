@@ -1,0 +1,24 @@
+Dịch Anh - VIệt — tắt hẳn tiện ích
+==================================
+
+Cách cài
+1. Giải nén thư mục này.
+2. Edge: edge://extensions. Bật chế độ nhà phát triển. Chọn Tải tiện ích đã giải nén và trỏ vào thư mục này.
+3. Edge hiện cảnh báo quyền: quản lý ứng dụng, tiện ích và chủ đề. Đó là chữ của trình duyệt cho quyền "management". Mã chỉ gọi chrome.management.setEnabled với đúng id của tiện ích này, để tắt chính nó. Không liệt kê và không tắt tiện ích khác.
+4. Nếu Edge đã cài bản cũ, gỡ bản cũ hoặc bấm Tải lại sau khi chép đè các file. Không có khóa API trong gói này.
+
+Phím
+- Alt+Q: điền đáp án, như trước. Đây là phím tắt của Edge.
+- Phím 1 hàng trên (cùng hàng với 2, 3, 4): tắt hẳn tiện ích trong Edge.
+- Chrome/Edge không cho khai báo phím tắt lệnh là số 1 không có Ctrl hoặc Alt. Manifest không chứa suggested_key "1".
+- Phím 1 chỉ nghe khi một trang web thường đang được chọn và tiện ích đã chèn script vào trang đó. Không nghe trên thanh địa chỉ, edge://extensions, edge://settings, hoặc khi Edge không được chọn. Không phải phím tắt toàn cục. Không dùng hook bàn phím.
+- Đang gõ trong input, textarea, select, hoặc vùng contenteditable thì phím 1 vẫn là chữ số, không tắt tiện ích.
+- Phím 1 trên bàn số (numpad) không tắt.
+- Không chạy cùng lúc với chương trình Windows AIQuizForms, vì chương trình đó cũng dùng phím 1 để thoát.
+
+Sau khi tắt
+- Tiện ích biến mất khỏi hoạt động. Phím 1 và Alt+Q không tự bật lại được.
+- Vào edge://extensions và bật lại công tắc của "Dịch Anh - VIệt".
+- Cấu hình API trong bộ nhớ của tiện ích được giữ. Không có cờ tắt kẹt sau khi bật lại.
+- Câu đã điền trên trang giữ nguyên. Script đã chèn có thể còn đến khi tải lại trang. Hãy tải lại trang sau khi bật lại tiện ích.
+- Nếu Edge từ chối tắt, huy hiệu báo lỗi và tiện ích vẫn bật. Nút trong popup chỉ tạm dừng, không thay cho việc tắt hẳn.

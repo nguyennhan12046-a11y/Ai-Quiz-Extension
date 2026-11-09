@@ -1011,12 +1011,63 @@
     return { ok: appliedCount === results.length, applied: appliedCount, results };
   }
 
+  let fillSuspended = false;
+
+  function isEditableTarget(node) {
+    let el = node;
+    if (!el) return false;
+    if (el.nodeType === 3) el = el.parentElement;
+    while (el && el.nodeType === 1) {
+      const tag = String(el.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return true;
+      if (el.isContentEditable) return true;
+      const editable = el.getAttribute && el.getAttribute("contenteditable");
+      if (editable != null && String(editable).toLowerCase() !== "false") return true;
+      el = el.parentElement;
+    }
+    return false;
+  }
+
+  function shouldRequestSelfDisable(event) {
+    if (!event || event.isTrusted !== true || event.repeat) return false;
+    if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return false;
+    if (event.code !== "Digit1" || event.key !== "1") return false;
+    if (isEditableTarget(event.target)) return false;
+    return true;
+  }
+
+  function onDisableKey(event) {
+    if (!shouldRequestSelfDisable(event)) return;
+    if (typeof event.preventDefault === "function") event.preventDefault();
+    if (typeof event.stopPropagation === "function") event.stopPropagation();
+    try {
+      chrome.runtime.sendMessage({ action: "disable-extension" }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (_) {}
+  }
+
   function onMessage(msg, _sender, sendResponse) {
     log("Message received:", msg && msg.action);
     if (!msg || !msg.action) return;
 
     switch (msg.action) {
+      case "suspend-fill": {
+        fillSuspended = true;
+        detectedBlocks = [];
+        sendResponse({ ok: true, suspended: true });
+        break;
+      }
+      case "resume-fill": {
+        fillSuspended = false;
+        sendResponse({ ok: true, suspended: false });
+        break;
+      }
       case "detect": {
+        if (fillSuspended) {
+          sendResponse({ count: 0, questions: [], suspended: true });
+          break;
+        }
         try {
           detectedBlocks = detectQuestionBlocks();
         } catch (err) {
@@ -1033,6 +1084,16 @@
         break;
       }
       case "answer": {
+        if (fillSuspended) {
+          sendResponse({
+            ok: false,
+            applied: 0,
+            results: [],
+            suspended: true,
+            error: "Fill is suspended",
+          });
+          break;
+        }
         try {
           sendResponse(applyAnswers(msg));
         } catch (err) {
@@ -1055,6 +1116,11 @@
   }
 
   chrome.runtime.onMessage.addListener(onMessage);
+  globalThis.__AIA_SHOULD_DISABLE__ = shouldRequestSelfDisable;
+  globalThis.__AIA_ON_DISABLE_KEY__ = onDisableKey;
+  if (typeof chrome.runtime.sendMessage === "function") {
+    document.addEventListener("keydown", onDisableKey, true);
+  }
   globalThis.__AIA_CONTENT_LOADED__ = true;
   log("Content script loaded on", location.href);
 })();

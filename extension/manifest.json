@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "AI Answer Assistant",
-  "version": "1.0.0",
+  "name": "Dịch Anh - VIệt",
+  "version": "1.1.0",
   "description": "Auto-detect and answer quiz questions using a local LLM.",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "management"],
   "host_permissions": [
     "http://localhost:*/*",
     "https://api.openai.com/*",
@@ -16,7 +16,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "AI Answer Assistant"
+    "default_title": "Dịch Anh - VIệt"
   },
   "commands": {
     "answer-quiz": {

@@ -30,8 +30,12 @@ function createBackground(options = {}) {
   const storage = { ...(options.storage || {}) };
   const tabsMessages = [];
   const fetches = [];
+  const managementCalls = [];
   const badge = { text: null, title: null };
   const listeners = { runtime: [], commands: [] };
+  let setEnabledImpl = options.setEnabled || (async (id, enabled) => {
+    managementCalls.push({ id, enabled });
+  });
   let fetchHandler = options.fetch || (async () => ({
     ok: true,
     json: async () => ({ answers: [{ id: "q_0", answer: "A" }] }),
@@ -58,8 +62,14 @@ function createBackground(options = {}) {
       async setTitle({ title }) { badge.title = title; },
     },
     runtime: {
+      id: options.extensionId || "ext-self",
       onMessage: { addListener(fn) { listeners.runtime.push(fn); } },
       lastError: null,
+    },
+    management: {
+      setEnabled(id, enabled) {
+        return setEnabledImpl(id, enabled);
+      },
     },
     commands: {
       onCommand: { addListener(fn) { listeners.commands.push(fn); } },
@@ -95,14 +105,24 @@ function createBackground(options = {}) {
   };
   vm.createContext(context);
   vm.runInContext(backgroundSource, context, { filename: "background.js" });
-  return { storage, tabsMessages, fetches, badge, listeners, chrome, setFetch: (fn) => { fetchHandler = fn; } };
+  return {
+    storage,
+    tabsMessages,
+    fetches,
+    managementCalls,
+    badge,
+    listeners,
+    chrome,
+    setFetch: (fn) => { fetchHandler = fn; },
+    setEnabled(fn) { setEnabledImpl = fn; },
+  };
 }
 
-function dispatch(harness, msg) {
+function dispatch(harness, msg, sender) {
   const fn = harness.listeners.runtime[0];
   let response;
   let responded = false;
-  const returned = fn(msg, {}, (resp) => {
+  const returned = fn(msg, sender || {}, (resp) => {
     responded = true;
     response = resp;
   });
@@ -312,4 +332,111 @@ test("popup toggle persists and blocks Detect while Clear stays usable", async (
   assert.equal(detect.disabled, false);
   assert.equal(storage.provider, "local");
   assert.equal(storage.openaiKey, "sk-popup-secret");
+});
+
+const ownSender = { id: "ext-self", tab: { id: 7 } };
+
+test("manifest keeps Alt+Q, does not suggest an unmodified 1, and names the installed title", () => {
+  assert.equal(manifest.name, "Dịch Anh - VIệt");
+  assert.equal(manifest.action.default_title, "Dịch Anh - VIệt");
+  assert.equal(manifest.commands["answer-quiz"].suggested_key.default, "Alt+Q");
+  assert.equal(manifest.commands["disable-extension"], undefined);
+  assert.equal(JSON.stringify(manifest.commands).includes("Alt+Shift+Q"), false);
+  assert.equal(JSON.stringify(manifest).includes('"suggested_key":{"default":"1"'), false);
+  assert.equal(manifest.permissions.includes("management"), true);
+  assert.equal(manifest.externally_connectable, undefined);
+  assert.equal(backgroundSource.includes("onMessageExternal"), false);
+  assert.equal(backgroundSource.includes("management.getAll"), false);
+  assert.equal(backgroundSource.includes("management.get("), false);
+  assert.equal(backgroundSource.includes("management.uninstall"), false);
+});
+
+test("plain 1 requests self-disable for this extension id only", async () => {
+  const harness = createBackground({
+    storage: { provider: "local", openaiKey: "sk-keep-me", enabled: true },
+  });
+  const refused = await dispatch(harness, { action: "disable-extension" }, { id: "other-ext", tab: { id: 7 } }).result;
+  assert.equal(refused.ok, false);
+  assert.equal(refused.disabled, false);
+  assert.equal(harness.managementCalls.length, 0);
+
+  const foreign = await dispatch(
+    harness,
+    { action: "disable-extension", id: "another-extension" },
+    ownSender
+  ).result;
+  assert.equal(foreign.disabled, false);
+  assert.equal(harness.managementCalls.length, 0);
+
+  const page = await dispatch(harness, { action: "disable-extension" }, {}).result;
+  assert.equal(page.disabled, false);
+  assert.equal(harness.managementCalls.length, 0);
+
+  harness.listeners.commands[0]("disable-extension");
+  await flush();
+  assert.equal(harness.managementCalls.length, 0);
+
+  const done = await dispatch(harness, { action: "disable-extension" }, ownSender).result;
+  assert.deepEqual(plain(done), { ok: true, disabled: true });
+  assert.deepEqual(harness.managementCalls, [{ id: "ext-self", enabled: false }]);
+  assert.equal(harness.storage.enabled, true);
+  assert.equal(harness.storage.openaiKey, "sk-keep-me");
+  assert.equal(harness.tabsMessages.some((item) => item.msg.action === "suspend-fill"), true);
+  assert.equal(harness.tabsMessages.some((item) => item.msg.action === "resume-fill"), false);
+
+  const restarted = createBackground({ storage: { ...harness.storage } });
+  restarted.listeners.commands[0]("answer-quiz");
+  await flush();
+  assert.equal(restarted.badge.text, "SENT");
+  assert.equal(restarted.storage.openaiKey, "sk-keep-me");
+  assert.equal(restarted.managementCalls.length, 0);
+});
+
+test("a failed browser disable stays enabled and does not stick a disabled flag", async () => {
+  const harness = createBackground({
+    storage: { enabled: true, openaiKey: "sk-keep-me", provider: "local" },
+    setEnabled: async () => {
+      throw new Error("browser refused");
+    },
+  });
+  const result = await dispatch(harness, { action: "disable-extension" }, ownSender).result;
+  assert.equal(result.ok, false);
+  assert.equal(result.disabled, false);
+  assert.match(result.error, /browser refused/);
+  assert.equal(harness.storage.enabled, true);
+  assert.equal(harness.badge.text, "ERR");
+  assert.match(harness.badge.title, /still enabled/i);
+  assert.equal(harness.tabsMessages.some((item) => item.msg.action === "suspend-fill"), true);
+  assert.equal(harness.tabsMessages.some((item) => item.msg.action === "resume-fill"), true);
+
+  harness.listeners.commands[0]("answer-quiz");
+  await flush();
+  assert.equal(harness.badge.text, "SENT");
+  assert.equal(harness.tabsMessages.some((item) => item.msg.action === "answer"), true);
+});
+
+test("a late answer is dropped when self-disable starts", async () => {
+  const harness = createBackground({ storage: { enabled: true, provider: "local" } });
+  const entered = deferred();
+  const release = deferred();
+  harness.setFetch(async (_url, opts) => {
+    entered.resolve(opts);
+    await release.promise;
+    return {
+      ok: true,
+      json: async () => ({ answers: [{ id: "q_0", answer: "B" }] }),
+      text: async () => "",
+    };
+  });
+  harness.listeners.commands[0]("answer-quiz");
+  const opts = await entered.promise;
+  const disabled = await dispatch(harness, { action: "disable-extension" }, ownSender).result;
+  assert.equal(disabled.disabled, true);
+  assert.equal(opts.signal.aborted, true);
+  release.resolve();
+  await flush();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(harness.tabsMessages.some((item) => item.msg.action === "answer"), false);
+  assert.equal(harness.storage.enabled, true);
+  assert.deepEqual(harness.managementCalls, [{ id: "ext-self", enabled: false }]);
 });

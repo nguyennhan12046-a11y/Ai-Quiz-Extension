@@ -147,8 +147,80 @@ if (chrome.commands && chrome.commands.onCommand) {
   });
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+function requestedForeignId(msg) {
+  if (!msg || typeof msg !== "object") return false;
+  const requested = msg.id || msg.extensionId || msg.targetId;
+  return typeof requested === "string" && requested !== chrome.runtime.id;
+}
+
+function ownExtensionSender(sender) {
+  return Boolean(sender && sender.id && sender.id === chrome.runtime.id);
+}
+
+async function tellTab(tabId, action) {
+  if (!tabId) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, { action });
+  } catch (_) {}
+}
+
+async function disableThisExtension(msg, sender) {
+  if (!ownExtensionSender(sender) || requestedForeignId(msg)) {
+    return {
+      ok: false,
+      disabled: false,
+      error: "Refused: only this extension can disable itself",
+    };
+  }
+  if (!chrome.management || typeof chrome.management.setEnabled !== "function") {
+    await setBadge(
+      "ERR",
+      "The browser did not disable the extension. It is still enabled.",
+      "#dc2626"
+    );
+    return {
+      ok: false,
+      disabled: false,
+      error: "management.setEnabled is not available",
+    };
+  }
+
+  cancelInFlight();
+  const tabId = sender.tab && sender.tab.id;
+  await tellTab(tabId, "suspend-fill");
+  try {
+    await chrome.management.setEnabled(chrome.runtime.id, false);
+    return { ok: true, disabled: true };
+  } catch (err) {
+    await tellTab(tabId, "resume-fill");
+    await setBadge(
+      "ERR",
+      "The browser did not disable the extension. It is still enabled.",
+      "#dc2626"
+    );
+    return {
+      ok: false,
+      disabled: false,
+      error: err && err.message ? err.message : "setEnabled failed",
+    };
+  }
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg.action !== "string") return;
+
+  if (msg.action === "disable-extension") {
+    disableThisExtension(msg, sender)
+      .then(sendResponse)
+      .catch((err) => {
+        sendResponse({
+          ok: false,
+          disabled: false,
+          error: err && err.message ? err.message : "setEnabled failed",
+        });
+      });
+    return true;
+  }
 
   if (msg.action === "setEnabled") {
     const enabled = msg.enabled !== false;
